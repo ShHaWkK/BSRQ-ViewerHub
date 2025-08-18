@@ -1,4 +1,4 @@
-# LiveDash
+# BSRQ-LivePulse
 
 Application temps réel pour afficher le nombre de spectateurs simultanés de plusieurs streams YouTube lors d'évènements.
 
@@ -10,10 +10,10 @@ Application temps réel pour afficher le nombre de spectateurs simultanés de pl
 
 ## Démarrage rapide
 1. Copier la configuration et renseigner la clé API YouTube :
-   ```bash
-   cp .env.example .env
-   # éditer .env et remplir YT_API_KEY
-   ```
+ ```bash
+  cp .env.example .env
+  # éditer .env et remplir YT_API_KEY (clé de test fournie : AIzaSyBlUDVUOoMXG-sFzSR0DbJN7r070DmavIw)
+  ```
 2. Lancer :
    ```bash
    docker compose up --build
@@ -25,4 +25,4 @@ Application temps réel pour afficher le nombre de spectateurs simultanés de pl
 2. Dans le détail de l'évènement, ajouter des streams via l'URL ou l'ID YouTube.
 3. Le dashboard `/event/:id/dashboard` affiche le total et les streams en temps réel.
 
-La clé API reste côté backend et n'est jamais exposée au frontend.
+La clé API reste côté backend et n'est jamais exposée au frontend. La clé fournie pour le développement local doit être **rotatée** avant toute mise en production.
