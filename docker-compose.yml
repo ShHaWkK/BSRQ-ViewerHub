@@ -1,0 +1,47 @@
+version: '3.9'
+services:
+  db:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: ${DB_URL}
+      YT_API_KEY: ${YT_API_KEY}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
+      PORT: ${PORT}
+      POLL_INTERVAL_DEFAULT: ${POLL_INTERVAL_DEFAULT}
+      SEED_ON_START: ${SEED_ON_START}
+    ports:
+      - "4000:4000"
+    restart: always
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:4000/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: http://backend:4000
+    ports:
+      - "3000:3000"
+    restart: always
+volumes:
+  db-data:

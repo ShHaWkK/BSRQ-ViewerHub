@@ -1,0 +1,30 @@
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  poll_interval_ms INT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS streams (
+  id TEXT PRIMARY KEY,
+  event_id TEXT REFERENCES events(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  platform TEXT DEFAULT 'youtube',
+  video_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS samples (
+  id BIGSERIAL PRIMARY KEY,
+  event_id TEXT REFERENCES events(id) ON DELETE CASCADE,
+  ts TIMESTAMPTZ NOT NULL,
+  total INT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS stream_samples (
+  id BIGSERIAL PRIMARY KEY,
+  event_id TEXT REFERENCES events(id) ON DELETE CASCADE,
+  stream_id TEXT REFERENCES streams(id) ON DELETE CASCADE,
+  ts TIMESTAMPTZ NOT NULL,
+  concurrent_viewers INT NOT NULL
+);
