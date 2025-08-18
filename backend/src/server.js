@@ -101,7 +101,7 @@ app.post('/events', async (req, res) => {
   const ev = { id, name, poll_interval_ms: poll, streams: [], state: { total: 0, streams: {} } };
   events.set(id, ev);
   startPolling(id);
-  res.json(ev);
+  res.json({ id: ev.id, name: ev.name, pollIntervalSec: ev.poll_interval_ms / 1000, streams: ev.streams, state: ev.state });
 });
 
 app.get('/events', (req, res) => {

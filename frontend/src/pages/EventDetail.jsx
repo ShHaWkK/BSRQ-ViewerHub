@@ -31,7 +31,8 @@ export default function EventDetail() {
     <div>
       <header>
         <h1>{event.name}</h1>
-        <Link to={`/event/${id}/dashboard`}>Afficher le Dashboard</Link>
+        <Link to={`/event/${id}/dashboard`}>Afficher le Dashboard</Link>{' | '}
+        <Link to={`/event/${id}/live`}>Voir les Lives</Link>
       </header>
       <ul>
         {event.streams.map(s => (
