@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import fetch from 'node-fetch'; // Node 18 global but to ensure
+
 import pool, { migrate } from './db.js';
 import { extractVideoId } from '../utils/youtube.js';
 import { genId } from '../utils/id.js';
