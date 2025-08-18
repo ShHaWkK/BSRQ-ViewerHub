@@ -1,6 +1,6 @@
 version: '3.9'
 services:
-  db:
+  bsrq-livepulse-db:
     image: postgres:16
     restart: always
     environment:
@@ -14,10 +14,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  backend:
+  bsrq-livepulse-backend:
     build: ./backend
     depends_on:
-      db:
+      bsrq-livepulse-db:
         condition: service_healthy
     environment:
       DB_URL: ${DB_URL}
@@ -34,12 +34,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  frontend:
+  bsrq-livepulse-frontend:
     build: ./frontend
     depends_on:
-      - backend
+      - bsrq-livepulse-backend
     environment:
-      VITE_API_URL: http://backend:4000
+      VITE_API_URL: http://bsrq-livepulse-backend:4000
     ports:
       - "3000:3000"
     restart: always
