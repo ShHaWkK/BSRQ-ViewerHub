@@ -261,7 +261,7 @@ export default function Admin() {
             backgroundClip: 'text',
             animation: 'glow 2s ease-in-out infinite alternate'
           }}>
-            🎯 Centre de Contrôle
+            BSRQ
           </h1>
           <p style={{ 
             fontSize: '1.2rem', 
