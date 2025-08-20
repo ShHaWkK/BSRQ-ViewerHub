@@ -201,7 +201,7 @@ const LiveStreamCard = ({ stream, streamState, index }) => {
               margin: '0 0 1rem 0',
               fontSize: '1.3rem',
               fontWeight: '700',
-              background: 'linear-gradient(45deg, #f59e0b, #ef4444, #8b5cf6)',
+              background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               backgroundClip: 'text'

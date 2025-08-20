@@ -213,7 +213,7 @@ const DynamicStreamCard = ({ label, current, online }) => {
           style={{
             fontSize: '2rem',
             fontWeight: '700',
-            background: 'linear-gradient(45deg, #f59e0b, #ef4444, #8b5cf6)',
+            background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
@@ -302,7 +302,7 @@ export default function Dashboard() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'linear-gradient(135deg, #1e1b4b 0%, #7c3aed 50%, #db2777 100%)',
+        background: 'linear-gradient(135deg, #1e1b4b 0%, #0c2164ff 50%, #db2777 100%)',
         color: 'white'
       }}>
         <div style={{ textAlign: 'center' }}>
@@ -329,12 +329,12 @@ export default function Dashboard() {
     datasets: [{
       label: 'Spectateurs',
       data: history.map(p => p.total),
-      borderColor: '#8b5cf6',
+      borderColor: '#0c2164ff',
       backgroundColor: 'rgba(139, 92, 246, 0.1)',
       borderWidth: 3,
       fill: true,
       tension: 0.4,
-      pointBackgroundColor: '#8b5cf6',
+      pointBackgroundColor: '#0c2164ff',
       pointBorderColor: '#ffffff',
       pointBorderWidth: 2,
       pointRadius: 4,
@@ -353,7 +353,7 @@ export default function Dashboard() {
         backgroundColor: 'rgba(0, 0, 0, 0.8)',
         titleColor: '#ffffff',
         bodyColor: '#ffffff',
-        borderColor: '#8b5cf6',
+        borderColor: '#0c2164ff',
         borderWidth: 1
       }
     },
@@ -374,7 +374,7 @@ export default function Dashboard() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #1e1b4b 0%, #7c3aed 50%, #db2777 100%)',
+      background: 'linear-gradient(135deg, #1e1b4b 0%, #0c2164ff 50%, #db2777 100%)',
       color: 'white',
       position: 'relative'
     }}>
@@ -425,7 +425,7 @@ export default function Dashboard() {
             margin: '0 0 1rem 0', 
             fontSize: '2.5rem', 
             fontWeight: '700',
-            background: 'linear-gradient(45deg, #f59e0b, #ef4444, #8b5cf6)',
+            background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text'
@@ -508,7 +508,7 @@ export default function Dashboard() {
               margin: '0 0 1.5rem 0', 
               fontSize: '1.5rem', 
               fontWeight: '600',
-              background: 'linear-gradient(45deg, #8b5cf6, #3b82f6)',
+              background: 'linear-gradient(45deg, #0c2164ff, #3b82f6)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               backgroundClip: 'text'
@@ -542,9 +542,9 @@ export default function Dashboard() {
         }
         
         @keyframes glow {
-          0% { text-shadow: 0 0 5px rgba(139, 92, 246, 0.5); }
-          50% { text-shadow: 0 0 20px rgba(139, 92, 246, 0.8); }
-          100% { text-shadow: 0 0 5px rgba(139, 92, 246, 0.5); }
+          0% { text-shadow: 0 0 5px rgba(19, 48, 110, 0.8); }
+          50% { text-shadow: 0 0 20px rgba(19, 48, 110, 0.8); }
+          100% { text-shadow: 0 0 5px rgba(19, 48, 110, 0.5); }
         }
         
         @keyframes shine {
