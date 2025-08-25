@@ -3,7 +3,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 
 import pool, { migrate } from './db.js';
-import { extractVideoId } from '../utils/youtube.js';
+import { extractVideoId, generateAutoLabel } from '../utils/youtube.js';
 import { genId } from '../utils/id.js';
 import dotenv from 'dotenv';
 
@@ -26,6 +26,13 @@ async function init() {
   const { rows: evs } = await pool.query('SELECT * FROM events');
   for (const ev of evs) {
     ev.streams = (await pool.query('SELECT * FROM streams WHERE event_id=$1', [ev.id])).rows;
+    // Initialiser les propriétés par défaut si elles n'existent pas
+    ev.is_paused = ev.is_paused || false;
+    for (const stream of ev.streams) {
+      stream.is_favorite = stream.is_favorite || false;
+      stream.failure_count = stream.failure_count || 0;
+      stream.is_disabled = stream.is_disabled || false;
+    }
     events.set(ev.id, { ...ev, state: { total: 0, streams: {} } });
     startPolling(ev.id);
   }
@@ -41,13 +48,22 @@ function getEvent(id) {
 function startPolling(eventId) {
   const ev = getEvent(eventId);
   async function poll() {
+    // Vérifier si l'événement est en pause
+    if (ev.is_paused) return;
+    
     if (!ev.streams.length) return;
-    const ids = ev.streams.map(s => s.video_id);
+    
+    // Filtrer les streams non désactivés
+    const activeStreams = ev.streams.filter(s => !s.is_disabled);
+    if (!activeStreams.length) return;
+    
+    const ids = activeStreams.map(s => s.video_id);
     const chunks = [];
     while (ids.length) chunks.push(ids.splice(0, 50));
     let total = 0;
     const now = new Date();
     const streamStates = {};
+    
     for (const chunk of chunks) {
       const url = `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${chunk.join(',')}&key=${process.env.YT_API_KEY}`;
       let data;
@@ -56,18 +72,52 @@ function startPolling(eventId) {
         data = await res.json();
       } catch (e) {
         console.error('Erreur YouTube', e);
+        // Incrémenter le compteur d'échecs pour tous les streams de ce chunk
+        for (const videoId of chunk) {
+          const stream = activeStreams.find(s => s.video_id === videoId);
+          if (stream) {
+            await handleStreamFailure(stream, ev.id);
+          }
+        }
         continue;
       }
+      
+      // Traiter les réponses réussies
       for (const item of data.items || []) {
         const id = item.id;
-        const stream = ev.streams.find(s => s.video_id === id);
+        const stream = activeStreams.find(s => s.video_id === id);
+        if (!stream) continue;
+        
         const viewers = item.liveStreamingDetails?.concurrentViewers ? parseInt(item.liveStreamingDetails.concurrentViewers) : 0;
         const online = !!item.liveStreamingDetails?.concurrentViewers;
-        streamStates[stream.id] = { id: stream.id, label: stream.label, current: viewers, online };
+        
+        // Réinitialiser le compteur d'échecs en cas de succès
+        if (stream.failure_count > 0) {
+          await pool.query('UPDATE streams SET failure_count = 0, last_failure_at = NULL WHERE id = $1', [stream.id]);
+          stream.failure_count = 0;
+          stream.last_failure_at = null;
+        }
+        
+        streamStates[stream.id] = { 
+          id: stream.id, 
+          label: stream.label, 
+          current: viewers, 
+          online,
+          is_favorite: stream.is_favorite || false
+        };
         total += viewers;
         await pool.query('INSERT INTO stream_samples(event_id, stream_id, ts, concurrent_viewers) VALUES($1,$2,$3,$4)', [ev.id, stream.id, now, viewers]);
       }
+      
+      // Gérer les streams qui n'ont pas de réponse (potentiellement en échec)
+      for (const videoId of chunk) {
+        const stream = activeStreams.find(s => s.video_id === videoId);
+        if (stream && !data.items?.find(item => item.id === videoId)) {
+          await handleStreamFailure(stream, ev.id);
+        }
+      }
     }
+    
     ev.state = { total, streams: streamStates };
     await pool.query('INSERT INTO samples(event_id, ts, total) VALUES($1,$2,$3)', [ev.id, now, total]);
     // Notifier SSE
@@ -78,6 +128,29 @@ function startPolling(eventId) {
   poll();
   ev.timer && clearInterval(ev.timer);
   ev.timer = setInterval(poll, ev.poll_interval_ms);
+}
+
+// Fonction pour gérer les échecs de stream
+async function handleStreamFailure(stream, eventId) {
+  const newFailureCount = (stream.failure_count || 0) + 1;
+  const now = new Date();
+  
+  if (newFailureCount >= 3) {
+    // Désactiver le stream après 3 échecs
+    await pool.query('UPDATE streams SET failure_count = $1, last_failure_at = $2, is_disabled = TRUE WHERE id = $3', 
+      [newFailureCount, now, stream.id]);
+    stream.failure_count = newFailureCount;
+    stream.last_failure_at = now;
+    stream.is_disabled = true;
+    console.log(`Stream ${stream.label} (${stream.video_id}) désactivé après 3 échecs`);
+  } else {
+    // Incrémenter le compteur d'échecs
+    await pool.query('UPDATE streams SET failure_count = $1, last_failure_at = $2 WHERE id = $3', 
+      [newFailureCount, now, stream.id]);
+    stream.failure_count = newFailureCount;
+    stream.last_failure_at = now;
+    console.log(`Échec ${newFailureCount}/3 pour le stream ${stream.label} (${stream.video_id})`);
+  }
 }
 
 async function seed() {
@@ -120,12 +193,15 @@ app.get('/events/:id', (req, res) => {
 app.post('/events/:id/streams', async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
-    const { label, urlOrId } = req.body;
+    const { label, urlOrId, customTitle, customInterval } = req.body;
     const videoId = extractVideoId(urlOrId);
     if (!videoId) return res.status(400).json({ error: 'id invalide' });
     const id = genId();
-    await pool.query('INSERT INTO streams(id,event_id,label,video_id) VALUES($1,$2,$3,$4)', [id, ev.id, label, videoId]);
-    const stream = { id, event_id: ev.id, label, video_id: videoId };
+    const intervalSec = customInterval ? Math.max(2, Math.min(300, parseInt(customInterval))) : null;
+    // Générer automatiquement le label si vide
+    const finalLabel = label && label.trim() ? label : generateAutoLabel(urlOrId);
+    await pool.query('INSERT INTO streams(id,event_id,label,video_id,custom_title,custom_interval_sec) VALUES($1,$2,$3,$4,$5,$6)', [id, ev.id, finalLabel, videoId, customTitle || null, intervalSec]);
+    const stream = { id, event_id: ev.id, label: finalLabel, video_id: videoId, custom_title: customTitle || null, custom_interval_sec: intervalSec };
     ev.streams.push(stream);
     res.json(stream);
   } catch {
@@ -170,6 +246,119 @@ app.get('/events/:id/stream', async (req, res) => {
     const { rows } = await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts > NOW() - INTERVAL \'60 minutes\' ORDER BY ts', [ev.id]);
     const payload = JSON.stringify({ type: 'init', data: { state: ev.state, history: rows } });
     res.write(`data: ${payload}\n\n`);
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Routes pour contrôler la pause/start
+app.post('/events/:id/pause', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    await pool.query('UPDATE events SET is_paused = TRUE WHERE id = $1', [ev.id]);
+    ev.is_paused = true;
+    res.json({ ok: true, paused: true });
+  } catch {
+    res.status(404).end();
+  }
+});
+
+app.post('/events/:id/start', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    await pool.query('UPDATE events SET is_paused = FALSE WHERE id = $1', [ev.id]);
+    ev.is_paused = false;
+    res.json({ ok: true, paused: false });
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Routes pour gérer les favoris
+app.post('/events/:id/streams/:sid/favorite', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    const { is_favorite } = req.body;
+    await pool.query('UPDATE streams SET is_favorite = $1 WHERE id = $2 AND event_id = $3', [is_favorite, req.params.sid, ev.id]);
+    const stream = ev.streams.find(s => s.id === req.params.sid);
+    if (stream) {
+      stream.is_favorite = is_favorite;
+    }
+    res.json({ ok: true, is_favorite });
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Route pour réactiver un stream désactivé
+app.post('/events/:id/streams/:sid/reactivate', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    await pool.query('UPDATE streams SET is_disabled = FALSE, failure_count = 0, last_failure_at = NULL WHERE id = $1 AND event_id = $2', [req.params.sid, ev.id]);
+    const stream = ev.streams.find(s => s.id === req.params.sid);
+    if (stream) {
+      stream.is_disabled = false;
+      stream.failure_count = 0;
+      stream.last_failure_at = null;
+    }
+    res.json({ ok: true });
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Route pour modifier un stream existant
+app.put('/events/:id/streams/:sid', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    const { label, customTitle, customInterval } = req.body;
+    const intervalSec = customInterval ? Math.max(2, Math.min(300, parseInt(customInterval))) : null;
+    
+    await pool.query('UPDATE streams SET label=$1, custom_title=$2, custom_interval_sec=$3 WHERE id=$4 AND event_id=$5', 
+      [label, customTitle || null, intervalSec, req.params.sid, ev.id]);
+    
+    const stream = ev.streams.find(s => s.id === req.params.sid);
+    if (stream) {
+      stream.label = label;
+      stream.custom_title = customTitle || null;
+      stream.custom_interval_sec = intervalSec;
+    }
+    
+    res.json({ ok: true });
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Pause d'un flux individuel
+app.post('/events/:id/streams/:sid/pause', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    await pool.query('UPDATE streams SET is_paused=TRUE WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);
+    
+    const stream = ev.streams.find(s => s.id === req.params.sid);
+    if (stream) {
+      stream.is_paused = true;
+    }
+    
+    res.json({ ok: true });
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Démarrage d'un flux individuel
+app.post('/events/:id/streams/:sid/start', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    await pool.query('UPDATE streams SET is_paused=FALSE WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);
+    
+    const stream = ev.streams.find(s => s.id === req.params.sid);
+    if (stream) {
+      stream.is_paused = false;
+    }
+    
+    res.json({ ok: true });
   } catch {
     res.status(404).end();
   }

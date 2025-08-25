@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { getEvents, createEvent } from '../api.js';
+import customLogo from '../assets/custom-logo.svg';
 
 // Composant de fond animé
 const AnimatedBackground = () => {
@@ -153,23 +154,57 @@ const EventCard = ({ event, index }) => {
           Intervalle de polling: {event.pollIntervalSec} secondes
         </div>
 
-        <Link
-          to={`/admin/event/${event.id}`}
-          style={{
-            display: 'inline-block',
-            background: 'linear-gradient(45deg, #8b5cf6, #3b82f6)',
-            color: 'white',
-            padding: '0.75rem 2rem',
-            borderRadius: '12px',
-            textDecoration: 'none',
-            fontWeight: '600',
-            transform: isHovered ? 'scale(1.05)' : 'scale(1)',
-            transition: 'all 0.3s ease',
-            boxShadow: '0 4px 15px rgba(139, 92, 246, 0.4)'
-          }}
-        >
-          🚀 Ouvrir l'évènement
-        </Link>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <Link
+            to={`/admin/event/${event.id}`}
+            style={{
+              display: 'inline-block',
+              background: 'linear-gradient(45deg, #8b5cf6, #3b82f6)',
+              color: 'white',
+              padding: '0.75rem 2rem',
+              borderRadius: '12px',
+              textDecoration: 'none',
+              fontWeight: '600',
+              transform: isHovered ? 'scale(1.05)' : 'scale(1)',
+              transition: 'all 0.3s ease',
+              boxShadow: '0 4px 15px rgba(139, 92, 246, 0.4)'
+            }}
+          >
+            🚀 Ouvrir l'évènement
+          </Link>
+          
+          <button
+            onClick={() => {
+              const newName = prompt('Nouveau nom de l\'évènement:', event.name);
+              if (newName && newName.trim() && newName !== event.name) {
+                // TODO: Implémenter la fonction de modification
+                alert(`Modification de "${event.name}" vers "${newName}" (fonctionnalité à implémenter)`);
+              }
+            }}
+            style={{
+              background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
+              color: 'white',
+              border: 'none',
+              padding: '0.75rem 1.5rem',
+              borderRadius: '12px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transform: isHovered ? 'scale(1.05)' : 'scale(1)',
+              transition: 'all 0.3s ease',
+              boxShadow: '0 4px 15px rgba(245, 158, 11, 0.4)'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'scale(1.1)';
+              e.target.style.boxShadow = '0 6px 20px rgba(245, 158, 11, 0.6)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = isHovered ? 'scale(1.05)' : 'scale(1)';
+              e.target.style.boxShadow = '0 4px 15px rgba(245, 158, 11, 0.4)';
+            }}
+          >
+            ✏️ Modifier
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -233,9 +268,10 @@ export default function Admin() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #0f0f23 0%, #1a1a3e 50%, #2d1b69 100%)',
+      background: 'linear-gradient(135deg, #2c1810 0%, #1a4645 25%, #2d5aa0 50%, #0f3460 75%, #8b1538 100%)',
       color: 'white',
-      position: 'relative'
+      position: 'relative',
+      overflow: 'hidden'
     }}>
       <AnimatedBackground />
       
@@ -244,18 +280,38 @@ export default function Admin() {
         <header style={{
           textAlign: 'center',
           marginBottom: '3rem',
-          background: 'rgba(255,255,255,0.1)',
+          background: 'linear-gradient(135deg, rgba(255,107,107,0.15) 0%, rgba(78,205,196,0.15) 25%, rgba(69,183,209,0.15) 50%, rgba(150,206,180,0.15) 75%, rgba(254,202,87,0.15) 100%)',
           backdropFilter: 'blur(20px)',
           borderRadius: '25px',
           padding: '3rem 2rem',
-          border: '1px solid rgba(255,255,255,0.2)',
-          boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
+          border: '2px solid rgba(255,107,107,0.3)',
+          boxShadow: '0 20px 40px rgba(255,107,107,0.2), 0 0 60px rgba(78,205,196,0.1)'
         }}>
+          <div style={{ marginBottom: '1.5rem' }}>
+            <img 
+              src={customLogo} 
+              alt="Logo Centre de Contrôle" 
+              style={{
+                height: '100px',
+                width: '100px',
+                filter: 'drop-shadow(0 0 20px rgba(255,107,107,0.5))',
+                animation: 'float 3s ease-in-out infinite',
+                display: 'block',
+                margin: '0 auto',
+                objectFit: 'contain'
+              }}
+              onError={(e) => {
+                console.error('Erreur de chargement du logo:', e);
+                e.target.style.display = 'none';
+              }}
+              onLoad={() => console.log('Logo chargé avec succès')}
+            />
+          </div>
           <h1 style={{
             margin: '0 0 1rem 0',
             fontSize: '3.5rem',
             fontWeight: '800',
-            background: 'linear-gradient(45deg, #f59e0b, #ef4444, #8b5cf6, #3b82f6)',
+            background: 'linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1, #96ceb4, #feca57)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
@@ -265,8 +321,9 @@ export default function Admin() {
           </h1>
           <p style={{ 
             fontSize: '1.2rem', 
-            color: 'rgba(255,255,255,0.8)',
-            margin: 0 
+            color: 'rgba(255,255,255,0.9)',
+            margin: 0,
+            textShadow: '0 2px 10px rgba(0,0,0,0.3)'
           }}>
             Gérez vos évènements live en temps réel
           </p>
@@ -287,7 +344,7 @@ export default function Admin() {
               margin: '0 0 2rem 0',
               fontSize: '1.8rem',
               fontWeight: '700',
-              background: 'linear-gradient(45deg, #10b981, #3b82f6)',
+              background: 'linear-gradient(45deg, #4ecdc4, #45b7d1)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               backgroundClip: 'text'
@@ -315,8 +372,8 @@ export default function Admin() {
                     backdropFilter: 'blur(10px)'
                   }}
                   onFocus={(e) => {
-                    e.target.style.borderColor = '#8b5cf6';
-                    e.target.style.boxShadow = '0 0 20px rgba(139, 92, 246, 0.3)';
+                    e.target.style.borderColor = '#4ecdc4';
+                    e.target.style.boxShadow = '0 0 20px rgba(78, 205, 196, 0.4)';
                   }}
                   onBlur={(e) => {
                     e.target.style.borderColor = 'rgba(255,255,255,0.2)';
@@ -342,8 +399,8 @@ export default function Admin() {
                     backdropFilter: 'blur(10px)'
                   }}
                   onFocus={(e) => {
-                    e.target.style.borderColor = '#8b5cf6';
-                    e.target.style.boxShadow = '0 0 20px rgba(139, 92, 246, 0.3)';
+                    e.target.style.borderColor = '#45b7d1';
+                    e.target.style.boxShadow = '0 0 20px rgba(69, 183, 209, 0.4)';
                   }}
                   onBlur={(e) => {
                     e.target.style.borderColor = 'rgba(255,255,255,0.2)';
@@ -358,7 +415,7 @@ export default function Admin() {
                 style={{
                   background: isSubmitting 
                     ? 'linear-gradient(45deg, #6b7280, #9ca3af)' 
-                    : 'linear-gradient(45deg, #8b5cf6, #3b82f6)',
+                    : 'linear-gradient(45deg, #ff6b6b, #4ecdc4)',
                   color: 'white',
                   border: 'none',
                   borderRadius: '15px',
@@ -442,6 +499,15 @@ export default function Admin() {
           100% { text-shadow: 0 0 30px rgba(59, 130, 246, 0.8); }
         }
         
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0px);
+          }
+          50% {
+            transform: translateY(-10px);
+          }
+        }
+        
         @keyframes slideInFromLeft {
           from {
             transform: translateX(-100px);
@@ -450,6 +516,15 @@ export default function Admin() {
           to {
             transform: translateX(0);
             opacity: 1;
+          }
+        }
+        
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0px);
+          }
+          50% {
+            transform: translateY(-10px);
           }
         }
         
