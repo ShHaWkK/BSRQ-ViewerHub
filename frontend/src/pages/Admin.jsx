@@ -212,9 +212,10 @@ const EventCard = ({ event, index }) => {
 
 export default function Admin() {
   const [events, setEvents] = useState([]);
-  const [form, setForm] = useState({ name: '', pollIntervalSec: 5 });
+  const [form, setForm] = useState({ name: '', pollIntervalSec: '5' });
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     getEvents().then(events => {
@@ -226,15 +227,33 @@ export default function Admin() {
   const submit = async e => {
     e.preventDefault();
     setIsSubmitting(true);
+    setError('');
     
     try {
-      const ev = await createEvent(form);
+      // Validation côté client
+      if (!form.name.trim()) {
+        throw new Error('Le nom de l\'événement est requis');
+      }
+      
+      const pollInterval = parseInt(form.pollIntervalSec);
+      if (isNaN(pollInterval) || pollInterval < 2) {
+        throw new Error('L\'intervalle doit être d\'au moins 2 secondes');
+      }
+      
+      const eventData = {
+        name: form.name.trim(),
+        pollIntervalSec: pollInterval
+      };
+      
+      const ev = await createEvent(eventData);
       setEvents([...events, ev]);
-      setForm({ name: '', pollIntervalSec: 5 });
+      setForm({ name: '', pollIntervalSec: '5' });
       
       // Animation de succès
       setTimeout(() => setIsSubmitting(false), 1000);
     } catch (error) {
+      console.error('Erreur lors de la création:', error);
+      setError(error.message || 'Erreur lors de la création de l\'événement');
       setIsSubmitting(false);
     }
   };
@@ -290,7 +309,7 @@ export default function Admin() {
           <div style={{ marginBottom: '1.5rem' }}>
             <img 
               src={customLogo} 
-              alt="Logo Centre de Contrôle" 
+              alt="Logo" 
               style={{
                 height: '100px',
                 width: '100px',
@@ -351,6 +370,21 @@ export default function Admin() {
             }}>
               ✨ Créer un Nouvel Évènement
             </h2>
+
+            {error && (
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(255,107,107,0.2) 0%, rgba(255,107,107,0.1) 100%)',
+                border: '1px solid rgba(255,107,107,0.3)',
+                borderRadius: '15px',
+                padding: '1rem',
+                marginBottom: '1.5rem',
+                color: '#ff6b6b',
+                fontSize: '0.9rem',
+                fontWeight: '500'
+              }}>
+                ⚠️ {error}
+              </div>
+            )}
 
             <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: '1rem' }}>

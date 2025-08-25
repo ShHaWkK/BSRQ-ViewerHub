@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getEvent, addStream, removeStream, pauseEvent, startEvent, reactivateStream, updateStream, pauseStream, startStream } from '../api.js';
+import { getEvent, addStream, removeStream, pauseEvent, startEvent, reactivateStream, updateStream, pauseStream, startStream, toggleStreamFavorite } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
 // Composant de particules flottantes
@@ -60,7 +60,7 @@ const FloatingParticles = () => {
 };
 
 // Composant Stream Item animé
-const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, onStartStream, index }) => {
+const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, onStartStream, onToggleFavorite, index }) => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -87,6 +87,10 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
 
   const handleStartStream = async () => {
     await onStartStream(stream.id);
+  };
+
+  const handleToggleFavorite = async () => {
+    await onToggleFavorite(stream.id, !stream.is_favorite);
   };
 
   const handleEdit = () => {
@@ -212,11 +216,28 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
             </div>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <button
+                onClick={handleToggleFavorite}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '2rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  transform: stream.is_favorite ? 'scale(1.2)' : 'scale(1)',
+                  filter: stream.is_favorite ? 'drop-shadow(0 0 10px #fbbf24)' : 'none'
+                }}
+                title={stream.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+              >
+                {stream.is_favorite ? '⭐' : '☆'}
+              </button>
               <h3 style={{
                 margin: 0,
                 fontSize: '1.3rem',
                 fontWeight: '600',
-                background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
+                background: stream.is_favorite 
+                  ? 'linear-gradient(45deg, #fbbf24, #f59e0b, #d97706)' 
+                  : 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
                 backgroundClip: 'text'
@@ -498,6 +519,15 @@ export default function EventDetail() {
       await refresh();
     } catch (error) {
       console.error('Erreur lors de la réactivation:', error);
+    }
+  };
+
+  const handleToggleFavorite = async (streamId, isFavorite) => {
+    try {
+      await toggleStreamFavorite(id, streamId, isFavorite);
+      await refresh();
+    } catch (error) {
+      console.error('Erreur lors du toggle favori:', error);
     }
   };
 
@@ -850,7 +880,14 @@ export default function EventDetail() {
             color: 'white'
           }}>Flux ajoutés</h2>
 
-          {event.streams.map((stream, index) => (
+          {event.streams
+            .sort((a, b) => {
+              // Favoris en premier
+              if (a.is_favorite && !b.is_favorite) return -1;
+              if (!a.is_favorite && b.is_favorite) return 1;
+              return 0;
+            })
+            .map((stream, index) => (
             <StreamItem 
               key={stream.id} 
               stream={stream} 
@@ -859,6 +896,7 @@ export default function EventDetail() {
               onStartStream={handleStartStream}
               onReactivate={handleReactivateStream}
               onUpdate={handleUpdateStream}
+              onToggleFavorite={handleToggleFavorite}
               index={index} 
             />
           ))}
