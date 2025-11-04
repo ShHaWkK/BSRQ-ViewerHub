@@ -11,7 +11,8 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: process.env.FRONTEND_ORIGIN }));
+// Autoriser toutes les origines en développement pour éviter les erreurs CORS locales
+app.use(cors());
 
 // Rate limit simple pour endpoints admin
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
@@ -257,6 +258,11 @@ app.post('/events/:id/pause', async (req, res) => {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE events SET is_paused = TRUE WHERE id = $1', [ev.id]);
     ev.is_paused = true;
+    // Arrêter complètement le polling pendant la pause
+    if (ev.timer) {
+      clearInterval(ev.timer);
+      ev.timer = null;
+    }
     res.json({ ok: true, paused: true });
   } catch {
     res.status(404).end();
@@ -268,6 +274,10 @@ app.post('/events/:id/start', async (req, res) => {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE events SET is_paused = FALSE WHERE id = $1', [ev.id]);
     ev.is_paused = false;
+    // Relancer le polling si il avait été arrêté
+    if (!ev.timer) {
+      startPolling(ev.id);
+    }
     res.json({ ok: true, paused: false });
   } catch {
     res.status(404).end();
