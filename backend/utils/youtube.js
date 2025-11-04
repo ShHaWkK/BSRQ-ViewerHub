@@ -2,7 +2,7 @@
 export function extractVideoId(input) {
   if (!input) return null;
   const regexList = [
-    /(?:v=|\/videos\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/, // URL classiques
+    /(?:v=|\/videos\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/, 
     /^([a-zA-Z0-9_-]{11})$/ // ID brut
   ];
   for (const r of regexList) {

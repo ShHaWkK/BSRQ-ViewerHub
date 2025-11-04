@@ -53,8 +53,8 @@ function startPolling(eventId) {
     
     if (!ev.streams.length) return;
     
-    // Filtrer les streams non désactivés
-    const activeStreams = ev.streams.filter(s => !s.is_disabled);
+    // Filtrer les streams non désactivés ET non en pause individuellement
+    const activeStreams = ev.streams.filter(s => !s.is_disabled && !s.is_paused);
     if (!activeStreams.length) return;
     
     const ids = activeStreams.map(s => s.video_id);
@@ -304,6 +304,27 @@ app.post('/events/:id/streams/:sid/reactivate', async (req, res) => {
     res.json({ ok: true });
   } catch {
     res.status(404).end();
+  }
+});
+
+// Route pour récupérer le titre d'une vidéo YouTube
+app.get('/youtube/title/:videoId', async (req, res) => {
+  try {
+    const videoId = req.params.videoId;
+    const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${process.env.YT_API_KEY}`;
+    
+    const response = await fetch(url, { timeout: 10000 });
+    const data = await response.json();
+    
+    if (data.items && data.items.length > 0) {
+      const title = data.items[0].snippet.title;
+      res.json({ title });
+    } else {
+      res.status(404).json({ error: 'Vidéo non trouvée' });
+    }
+  } catch (error) {
+    console.error('Erreur lors de la récupération du titre YouTube:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 

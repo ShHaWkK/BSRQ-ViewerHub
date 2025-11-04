@@ -66,7 +66,6 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({
     label: stream.label || '',
-    customTitle: stream.custom_title || '',
     customInterval: stream.custom_interval_sec || ''
   });
 
@@ -109,7 +108,6 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
   const handleCancelEdit = () => {
     setEditForm({
       label: stream.label || '',
-      customTitle: stream.custom_title || '',
       customInterval: stream.custom_interval_sec || ''
     });
     setIsEditing(false);
@@ -180,22 +178,7 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                   outline: 'none'
                 }}
               />
-              <input
-                type="text"
-                placeholder="Titre personnalisé (optionnel)"
-                value={editForm.customTitle}
-                onChange={e => setEditForm({ ...editForm, customTitle: e.target.value })}
-                style={{
-                  padding: '0.5rem',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  background: 'rgba(255,255,255,0.1)',
-                  color: 'white',
-                  width: '100%',
-                  marginBottom: '0.5rem',
-                  outline: 'none'
-                }}
-              />
+
               <input
                 type="number"
                 placeholder="Intervalle (sec, optionnel)"
@@ -221,11 +204,12 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                 style={{
                   background: 'none',
                   border: 'none',
-                  fontSize: '2rem',
+                  fontSize: stream.is_favorite ? '2.5rem' : '1.2rem',
                   cursor: 'pointer',
                   transition: 'all 0.3s ease',
-                  transform: stream.is_favorite ? 'scale(1.2)' : 'scale(1)',
-                  filter: stream.is_favorite ? 'drop-shadow(0 0 10px #fbbf24)' : 'none'
+                  transform: stream.is_favorite ? 'scale(1.3)' : 'scale(0.7)',
+                  filter: stream.is_favorite ? 'drop-shadow(0 0 15px #fbbf24)' : 'none',
+                  opacity: stream.is_favorite ? 1 : 0.5
                 }}
                 title={stream.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
               >
@@ -241,7 +225,7 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
                 backgroundClip: 'text'
-              }}>📺 {stream.custom_title || stream.label}</h3>
+              }}>📺 {stream.label}</h3>
               {stream.custom_interval_sec && (
                 <span style={{
                   fontSize: '0.8rem',
@@ -433,7 +417,9 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
 export default function EventDetail() {
   const { id } = useParams();
   const [event, setEvent] = useState(null);
-  const [form, setForm] = useState({ label: '', urlOrId: '', customTitle: '', customInterval: '' });
+  const [form, setForm] = useState({ label: '', urlOrId: '', customInterval: '' });
+  const [autoTitle, setAutoTitle] = useState('');
+  const [isLoadingTitle, setIsLoadingTitle] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -450,13 +436,44 @@ export default function EventDetail() {
     refresh(); 
   }, [id]);
 
+  const fetchVideoTitle = async (urlOrId) => {
+    if (!urlOrId.trim()) return;
+    
+    setIsLoadingTitle(true);
+    try {
+      // Extraire l'ID de la vidéo depuis l'URL ou utiliser directement l'ID
+      let videoId = urlOrId;
+      if (urlOrId.includes('youtube.com') || urlOrId.includes('youtu.be')) {
+        const url = new URL(urlOrId);
+        videoId = url.searchParams.get('v') || url.pathname.split('/').pop();
+      }
+      
+      // Appel à l'API backend pour récupérer le titre
+      const response = await fetch(`http://localhost:4000/youtube/title/${videoId}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        const title = data.title;
+        setAutoTitle(title);
+        // Remplir automatiquement le label avec le titre de la vidéo
+        setForm(prev => ({ ...prev, label: title }));
+      } else {
+        console.error('Erreur lors de la récupération du titre:', response.status);
+      }
+    } catch (error) {
+      console.error('Erreur lors de la récupération du titre:', error);
+    }
+    setIsLoadingTitle(false);
+  };
+
   const submit = async e => {
     e.preventDefault();
     setIsSubmitting(true);
     
     try {
       await addStream(id, form);
-      setForm({ label: '', urlOrId: '', customTitle: '', customInterval: '' });
+      setForm({ label: '', urlOrId: '', customInterval: '' });
+      setAutoTitle('');
       await refresh();
       setTimeout(() => setIsSubmitting(false), 1000);
     } catch (error) {
@@ -782,46 +799,62 @@ export default function EventDetail() {
           </div>
 
           <div style={{ marginBottom: '1rem' }}>
-            <input
-              type="text"
-              placeholder="URL ou ID"
-              value={form.urlOrId}
-              onChange={e => setForm({ ...form, urlOrId: e.target.value })}
-              style={{
-                padding: '0.75rem',
-                borderRadius: '12px',
-                border: '1px solid rgba(255,255,255,0.2)',
-                background: 'rgba(255,255,255,0.1)',
-                color: 'white',
-                width: '100%',
-                maxWidth: '400px',
-                margin: '0 auto',
-                outline: 'none',
-                transition: 'all 0.3s ease',
-              }}
-            />
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'center' }}>
+              <input
+                type="text"
+                placeholder="URL ou ID YouTube"
+                value={form.urlOrId}
+                onChange={e => {
+                  const newValue = e.target.value;
+                  setForm({ ...form, urlOrId: newValue });
+                  // Déclencher automatiquement la récupération du titre si l'URL semble valide
+                  if (newValue.includes('youtube.com') || newValue.includes('youtu.be') || (newValue.length === 11 && !newValue.includes(' '))) {
+                    fetchVideoTitle(newValue);
+                  }
+                }}
+                style={{
+                  padding: '0.75rem',
+                  borderRadius: '12px',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  background: 'rgba(255,255,255,0.1)',
+                  color: 'white',
+                  width: '100%',
+                  maxWidth: '300px',
+                  outline: 'none',
+                  transition: 'all 0.3s ease',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fetchVideoTitle(form.urlOrId)}
+                disabled={!form.urlOrId.trim() || isLoadingTitle}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: '12px',
+                  border: 'none',
+                  background: isLoadingTitle ? 'linear-gradient(45deg, #6b7280, #9ca3af)' : 'linear-gradient(45deg, #3b82f6, #1d4ed8)',
+                  color: 'white',
+                  fontWeight: '600',
+                  cursor: (!form.urlOrId.trim() || isLoadingTitle) ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.3s ease',
+                  fontSize: '0.9rem'
+                }}
+              >
+                {isLoadingTitle ? '⏳' : '🔍 Titre'}
+              </button>
+            </div>
           </div>
 
-          <div style={{ marginBottom: '1rem' }}>
-            <input
-              type="text"
-              placeholder="Titre personnalisé (optionnel)"
-              value={form.customTitle}
-              onChange={e => setForm({ ...form, customTitle: e.target.value })}
-              style={{
-                padding: '0.75rem',
-                borderRadius: '12px',
-                border: '1px solid rgba(255,255,255,0.2)',
-                background: 'rgba(255,255,255,0.1)',
-                color: 'white',
-                width: '100%',
-                maxWidth: '400px',
-                margin: '0 auto',
-                outline: 'none',
-                transition: 'all 0.3s ease',
-              }}
-            />
-          </div>
+          {autoTitle && (
+            <div style={{
+              marginBottom: '1rem',
+              textAlign: 'center',
+              fontSize: '0.9rem',
+              color: 'rgba(255,255,255,0.7)'
+            }}>
+              📺 Titre détecté et ajouté au label: <span style={{ fontStyle: 'italic', color: 'white' }}>{autoTitle}</span>
+            </div>
+          )}
 
           <div style={{ marginBottom: '1rem' }}>
             <input
