@@ -12,7 +12,8 @@ import {
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import EventDetail from './EventDetail.jsx';
-import { getEvent } from '../api.js';
+import { getEvent, API } from '../api.js';
+import bsrqLogo from '../assets/bsrq.png';
 
 ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Tooltip, Legend);
 
@@ -264,11 +265,14 @@ export default function Dashboard() {
   const [history, setHistory] = useState([]);
   const [totalViewers, setTotalViewers] = useState(0);
   const [previousTotal, setPreviousTotal] = useState(0);
+  const [streamsHistory, setStreamsHistory] = useState({});
+  const totalChartRef = useRef(null);
+  const streamChartRefs = useRef({});
 
   useEffect(() => {
     getEvent(id).then(setEvent);
     
-    const es = new EventSource(`${import.meta.env.VITE_API_URL || 'http://localhost:4000'}/events/${id}/stream`);
+    const es = new EventSource(`${API}/events/${id}/stream`);
     
     es.onmessage = ev => {
       const msg = JSON.parse(ev.data);
@@ -289,6 +293,16 @@ export default function Dashboard() {
         setHistory(h => [...h.slice(-29), { ts: msg.data.ts, total: msg.data.total }]);
         setPreviousTotal(totalViewers);
         setTotalViewers(msg.data.total);
+        // Historique par stream
+        setStreamsHistory(prev => {
+          const next = { ...prev };
+          for (const s of msg.data.streams) {
+            const arr = next[s.id] || [];
+            arr.push({ ts: msg.data.ts, current: s.current });
+            next[s.id] = arr.slice(-500);
+          }
+          return next;
+        });
       }
     };
     
@@ -371,6 +385,29 @@ export default function Dashboard() {
     }
   };
 
+  // Export helpers
+  const downloadDataUrl = (filename, dataUrl) => {
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+  const downloadCSV = (filename, rows) => {
+    const header = 'timestamp,viewers\n';
+    const csv = header + rows.map(r => `${new Date(r.ts).toISOString()},${r.current ?? r.total ?? 0}`).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div style={{
       minHeight: '100vh',
@@ -421,6 +458,9 @@ export default function Dashboard() {
           padding: '2rem 1rem',
           textAlign: 'center'
         }}>
+          <div style={{ marginBottom: '1rem' }}>
+            <img src={bsrqLogo} alt="BSRQ" style={{ height: '60px' }} />
+          </div>
           <h1 style={{ 
             margin: '0 0 1rem 0', 
             fontSize: '2.5rem', 
@@ -495,7 +535,7 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {/* Graphique */}
+          {/* Graphique total + export */}
           <div style={{
             background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
             backdropFilter: 'blur(10px)',
@@ -516,9 +556,118 @@ export default function Dashboard() {
               📈 Évolution Temps Réel
             </h3>
             <div style={{ height: '300px' }}>
-              <Line data={data} options={options} />
+              <Line ref={totalChartRef} data={data} options={options} />
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+              <button
+                onClick={() => {
+                  const chart = totalChartRef.current;
+                  if (chart) downloadDataUrl(`total_viewers_${id}.png`, chart.toBase64Image());
+                }}
+                style={{
+                  background: 'linear-gradient(45deg, #10b981, #059669)',
+                  color: 'white', border: 'none', padding: '0.5rem 1rem',
+                  borderRadius: '10px', cursor: 'pointer'
+                }}
+              >
+                Exporter PNG
+              </button>
+              <button
+                onClick={() => downloadCSV(`total_viewers_${id}.csv`, history.map(h => ({ ts: h.ts, total: h.total })))}
+                style={{
+                  background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
+                  color: 'white', border: 'none', padding: '0.5rem 1rem',
+                  borderRadius: '10px', cursor: 'pointer'
+                }}
+              >
+                Exporter CSV
+              </button>
             </div>
           </div>
+
+          {/* Graphiques par stream + export */}
+          {Object.values(event.state?.streams || {}).length > 0 && (
+            <div style={{
+              marginTop: '2rem',
+              background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
+              backdropFilter: 'blur(10px)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '20px',
+              padding: '2rem',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+            }}>
+              <h3 style={{ 
+                margin: '0 0 1.5rem 0', 
+                fontSize: '1.5rem', 
+                fontWeight: '600',
+                background: 'linear-gradient(45deg, #0c2164ff, #3b82f6)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text'
+              }}>
+                📈 Par stream
+              </h3>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                gap: '1rem'
+              }}>
+                {Object.values(event.state.streams).map(s => {
+                  const rows = streamsHistory[s.id] || [];
+                  const sd = {
+                    labels: rows.map(r => new Date(r.ts)),
+                    datasets: [{
+                      label: s.label,
+                      data: rows.map(r => r.current || 0),
+                      borderColor: s.online ? '#10b981' : '#ef4444',
+                      backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                      borderWidth: 2,
+                      tension: 0.3,
+                      pointRadius: 0
+                    }]
+                  };
+                  return (
+                    <div key={s.id} style={{
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: '12px',
+                      padding: '1rem'
+                    }}>
+                      <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: 'white' }}>🎬 {s.label}</div>
+                      <div style={{ height: '200px' }}>
+                        <Line ref={el => (streamChartRefs.current[s.id] = el)} data={sd} options={{ ...options, maintainAspectRatio: false }} />
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                        <button
+                          onClick={() => {
+                            const chart = streamChartRefs.current[s.id];
+                            if (chart) downloadDataUrl(`${s.label.replace(/\s+/g,'_')}_viewers_${id}.png`, chart.toBase64Image());
+                          }}
+                          style={{
+                            background: 'linear-gradient(45deg, #10b981, #059669)',
+                            color: 'white', border: 'none', padding: '0.4rem 0.8rem',
+                            borderRadius: '8px', cursor: 'pointer'
+                          }}
+                        >
+                          PNG
+                        </button>
+                        <button
+                          onClick={() => downloadCSV(`${s.label.replace(/\s+/g,'_')}_viewers_${id}.csv`, rows)}
+                          style={{
+                            background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
+                            color: 'white', border: 'none', padding: '0.4rem 0.8rem',
+                            borderRadius: '8px', cursor: 'pointer'
+                          }}
+                        >
+                          CSV
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
