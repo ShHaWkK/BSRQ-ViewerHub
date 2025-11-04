@@ -12,7 +12,7 @@ import {
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import EventDetail from './EventDetail.jsx';
-import { getEvent, API } from '../api.js';
+import { getEvent } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
 ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Tooltip, Legend);
@@ -261,6 +261,7 @@ const DynamicStreamCard = ({ label, current, online }) => {
 
 export default function Dashboard() {
   const { id } = useParams();
+  const API_BASE = import.meta.env.VITE_API_URL || '/api';
   const [event, setEvent] = useState(null);
   const [history, setHistory] = useState([]);
   const [totalViewers, setTotalViewers] = useState(0);
@@ -272,7 +273,7 @@ export default function Dashboard() {
   useEffect(() => {
     getEvent(id).then(setEvent);
     
-    const es = new EventSource(`${API}/events/${id}/stream`);
+    const es = new EventSource(`${API_BASE}/events/${id}/stream`);
     
     es.onmessage = ev => {
       const msg = JSON.parse(ev.data);
