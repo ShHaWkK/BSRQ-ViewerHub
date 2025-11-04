@@ -14,6 +14,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
   bsrq-livepulse-backend:
     build: ./backend
     depends_on:
@@ -27,21 +28,24 @@ services:
       POLL_INTERVAL_DEFAULT: ${POLL_INTERVAL_DEFAULT}
       SEED_ON_START: ${SEED_ON_START}
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"   # <— uniquement en local
     restart: always
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:4000/health']
       interval: 10s
       timeout: 5s
       retries: 5
+
   bsrq-livepulse-frontend:
     build: ./frontend
     depends_on:
       - bsrq-livepulse-backend
     environment:
-      VITE_API_URL: http://bsrq-livepulse-backend:4000
+      # IMPORTANT : le frontend appelle l'API via le reverse-proxy Nginx
+      VITE_API_URL: /api
     ports:
-      - "3019:3000"
+      - "127.0.0.1:3019:3000"   # <— uniquement en local
     restart: always
+
 volumes:
   db-data:
