@@ -3,13 +3,21 @@ import { useParams, Link } from 'react-router-dom';
 import { getEvent, addStream, removeStream, pauseEvent, startEvent, reactivateStream, updateStream, pauseStream, startStream, toggleStreamFavorite } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
-// Composant de particules flottantes
+
+
+/**
+ * Composant pour afficher des particules flottantes en arrière-plan
+ * param {Object} props
+ * @returns 
+ */
 const FloatingParticles = () => {
   const containerRef = useRef(null);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) return;
 
     const createParticle = () => {
       const particle = document.createElement('div');
@@ -38,8 +46,16 @@ const FloatingParticles = () => {
       }, 15000);
     };
 
-    const interval = setInterval(createParticle, 800);
-    return () => clearInterval(interval);
+    let interval = setInterval(createParticle, 1600);
+    const onVis = () => {
+      clearInterval(interval);
+      interval = document.hidden ? null : setInterval(createParticle, 1600);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, []);
 
   return (
@@ -59,11 +75,29 @@ const FloatingParticles = () => {
   );
 };
 
-// Composant Stream Item animé
+/*
+  * Composant pour afficher un flux individuel avec ses actions
+  * @param {Object} props
+  * @param {Object} props.stream - Données du flux
+  * @param {Function} props.onDelete - Fonction de suppression du flux
+  * @param {Function} props.onReactivate - Fonction de réactivation du flux
+  * @param {Function} props.onUpdate - Fonction de mise à jour du flux
+  * @param {Function} props.onPauseStream - Fonction de mise en pause du flux
+  * @param {Function} props.onStartStream - Fonction de démarrage du flux
+  * @param {Function} props.onToggleFavorite - Fonction de basculement du favori
+  * @param {number} props.index - Index du flux pour l'animation
+  * @returns
+*/
+
+
 const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, onStartStream, onToggleFavorite, index }) => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [saveError, setSaveError] = useState(null);
   const [editForm, setEditForm] = useState({
     label: stream.label || '',
     customInterval: stream.custom_interval_sec || ''
@@ -81,11 +115,29 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
   };
 
   const handlePauseStream = async () => {
-    await onPauseStream(stream.id);
+    setActionError('');
+    setActionBusy(true);
+    try {
+      await onPauseStream(stream.id);
+    } catch (e) {
+      console.error('Pause stream failed:', e);
+      setActionError('Échec de la pause du flux.');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const handleStartStream = async () => {
-    await onStartStream(stream.id);
+    setActionError('');
+    setActionBusy(true);
+    try {
+      await onStartStream(stream.id);
+    } catch (e) {
+      console.error('Start stream failed:', e);
+      setActionError('Échec du démarrage du flux.');
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const handleToggleFavorite = async () => {
@@ -97,11 +149,16 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
   };
 
   const handleSaveEdit = async () => {
+    setSaveError(null);
+    setIsSaving(true);
     try {
       await onUpdate(stream.id, editForm);
       setIsEditing(false);
     } catch (error) {
       console.error('Erreur lors de la mise à jour:', error);
+      setSaveError('Échec de la sauvegarde. Réessayez.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -241,6 +298,7 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
               {stream.is_paused ? (
                 <button
                   onClick={handleStartStream}
+                  disabled={actionBusy}
                   style={{
                     background: 'linear-gradient(45deg, #10b981, #059669)',
                     color: 'white',
@@ -249,7 +307,7 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                     padding: '0.3rem 0.6rem',
                     fontSize: '0.8rem',
                     fontWeight: '600',
-                    cursor: 'pointer',
+                    cursor: actionBusy ? 'not-allowed' : 'pointer',
                     transition: 'all 0.3s ease'
                   }}
                   title="Démarrer ce flux"
@@ -259,6 +317,7 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
               ) : (
                 <button
                   onClick={handlePauseStream}
+                  disabled={actionBusy}
                   style={{
                     background: 'linear-gradient(45deg, #f59e0b, #d97706)',
                     color: 'white',
@@ -267,15 +326,18 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                     padding: '0.3rem 0.6rem',
                     fontSize: '0.8rem',
                     fontWeight: '600',
-                    cursor: 'pointer',
+                    cursor: actionBusy ? 'not-allowed' : 'pointer',
                     transition: 'all 0.3s ease'
                   }}
                   title="Mettre en pause ce flux"
                 >
-                  ⏸️ Pause
+                  {actionBusy ? '⏳...' : '⏸️ Pause'}
                 </button>
               )}
             </div>
+            {actionError && (
+              <div style={{ color: '#fecaca', marginTop: '0.25rem', fontSize: '0.8rem' }}>{actionError}</div>
+            )}
           </div>
           <p style={{ 
             margin: 0, 
@@ -327,6 +389,7 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
             <>
               <button
                 onClick={handleSaveEdit}
+                disabled={isSaving}
                 style={{
                   background: 'linear-gradient(45deg, #10b981, #059669)',
                   color: 'white',
@@ -335,12 +398,15 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                   padding: '0.5rem 1rem',
                   fontSize: '0.8rem',
                   fontWeight: '600',
-                  cursor: 'pointer',
+                  cursor: isSaving ? 'not-allowed' : 'pointer',
                   transition: 'all 0.3s ease'
                 }}
               >
-                ✅ Sauvegarder
+                {isSaving ? '⏳ Sauvegarde...' : '✅ Sauvegarder'}
               </button>
+              {saveError && (
+                <div style={{ color: '#fecaca', marginTop: '0.5rem' }}>{saveError}</div>
+              )}
               <button
                 onClick={handleCancelEdit}
                 style={{
@@ -422,8 +488,11 @@ export default function EventDetail() {
   const [isLoadingTitle, setIsLoadingTitle] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
   const [isPaused, setIsPaused] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
+  const titleAbortRef = useRef(null);
+  const titleDebounceRef = useRef(null);
 
   async function refresh() {
     const ev = await getEvent(id);
@@ -448,8 +517,13 @@ export default function EventDetail() {
         videoId = url.searchParams.get('v') || url.pathname.split('/').pop();
       }
       
-      // Appel à l'API backend pour récupérer le titre
-      const response = await fetch(`http://localhost:4000/youtube/title/${videoId}`);
+      // Appel à l'API backend pour récupérer le titre (via VITE_API_URL ou /api)
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      // Annule toute requête précédente
+      if (titleAbortRef.current) titleAbortRef.current.abort();
+      const controller = new AbortController();
+      titleAbortRef.current = controller;
+      const response = await fetch(`${API_BASE}/youtube/title/${videoId}`, { signal: controller.signal });
       
       if (response.ok) {
         const data = await response.json();
@@ -461,22 +535,53 @@ export default function EventDetail() {
         console.error('Erreur lors de la récupération du titre:', response.status);
       }
     } catch (error) {
-      console.error('Erreur lors de la récupération du titre:', error);
+      if (error.name !== 'AbortError') {
+        console.error('Erreur lors de la récupération du titre:', error);
+      }
     }
     setIsLoadingTitle(false);
   };
 
+  const debouncedFetchVideoTitle = (value) => {
+    if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current);
+    titleDebounceRef.current = setTimeout(() => {
+      fetchVideoTitle(value);
+    }, 400);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (titleAbortRef.current) titleAbortRef.current.abort();
+      if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current);
+    };
+  }, []);
+
   const submit = async e => {
     e.preventDefault();
     setIsSubmitting(true);
+    setSubmitError(null);
     
     try {
+      // Validation basique de l'ID YouTube pour meilleure UX
+      const isId = /^[a-zA-Z0-9_-]{11}$/;
+      let videoId = form.urlOrId;
+      if (form.urlOrId.includes('youtube.com') || form.urlOrId.includes('youtu.be')) {
+        const url = new URL(form.urlOrId);
+        videoId = url.searchParams.get('v') || url.pathname.split('/').pop();
+      }
+      if (!videoId || !isId.test(videoId)) {
+        setSubmitError('ID/URL YouTube invalide. Vérifiez la valeur saisie.');
+        setIsSubmitting(false);
+        return;
+      }
+
       await addStream(id, form);
       setForm({ label: '', urlOrId: '', customInterval: '' });
       setAutoTitle('');
       await refresh();
-      setTimeout(() => setIsSubmitting(false), 1000);
+      setIsSubmitting(false);
     } catch (error) {
+      setSubmitError(error.message || 'Échec ajout du flux. Réessayez.');
       setIsSubmitting(false);
     }
   };
@@ -809,7 +914,7 @@ export default function EventDetail() {
                   setForm({ ...form, urlOrId: newValue });
                   // Déclencher automatiquement la récupération du titre si l'URL semble valide
                   if (newValue.includes('youtube.com') || newValue.includes('youtu.be') || (newValue.length === 11 && !newValue.includes(' '))) {
-                    fetchVideoTitle(newValue);
+                    debouncedFetchVideoTitle(newValue);
                   }
                 }}
                 style={{
@@ -895,6 +1000,11 @@ export default function EventDetail() {
           >
             {isSubmitting ? '⏳ En cours...' : '➕ Ajouter'}
           </button>
+          {submitError && (
+            <div style={{ marginTop: '0.75rem', color: '#fecaca', fontWeight: '600' }}>
+              {submitError}
+            </div>
+          )}
         </form>
 
         {/* Liste des flux */}

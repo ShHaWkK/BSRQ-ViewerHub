@@ -8,14 +8,16 @@ import {
   LinearScale,
   TimeScale,
   Tooltip,
-  Legend
+  Legend,
+  Filler,
+  Decimation
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import EventDetail from './EventDetail.jsx';
 import { getEvent } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
-ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Tooltip, Legend);
+ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Tooltip, Legend, Filler, Decimation);
 
 // Composant de particules animées
 const ParticleSystem = () => {
@@ -26,6 +28,8 @@ const ParticleSystem = () => {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) return; // désactive pour les utilisateurs sensibles/économie
     
     const ctx = canvas.getContext('2d');
     const updateCanvasSize = () => {
@@ -37,7 +41,8 @@ const ParticleSystem = () => {
     // Créer des particules
     const createParticles = () => {
       particlesRef.current = [];
-      for (let i = 0; i < 50; i++) {
+      const base = 24; // réduit pour limiter l'usage GPU
+      for (let i = 0; i < base; i++) {
         particlesRef.current.push({
           x: Math.random() * canvas.width,
           y: Math.random() * canvas.height,
@@ -51,6 +56,7 @@ const ParticleSystem = () => {
     };
 
     const animate = () => {
+      if (document.hidden) return; // pause si onglet caché
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
       particlesRef.current.forEach((particle) => {
@@ -79,9 +85,20 @@ const ParticleSystem = () => {
     };
 
     window.addEventListener('resize', handleResize);
+    const handleVisibility = () => {
+      if (!document.hidden && !animationRef.current) {
+        animate();
+      }
+      if (document.hidden && animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
     
     return () => {
       window.removeEventListener('resize', handleResize);
+      document.removeEventListener('visibilitychange', handleVisibility);
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
@@ -261,54 +278,168 @@ const DynamicStreamCard = ({ label, current, online }) => {
 
 export default function Dashboard() {
   const { id } = useParams();
-  const API_BASE = import.meta.env.VITE_API_URL || '/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
   const [event, setEvent] = useState(null);
   const [history, setHistory] = useState([]);
+  const [historyMinutes, setHistoryMinutes] = useState(180); // number or 'all'
   const [totalViewers, setTotalViewers] = useState(0);
   const [previousTotal, setPreviousTotal] = useState(0);
   const [streamsHistory, setStreamsHistory] = useState({});
+  const [jobExporting, setJobExporting] = useState(false);
+  const [jobProgress, setJobProgress] = useState(0);
+  const [jobId, setJobId] = useState(null);
   const totalChartRef = useRef(null);
   const streamChartRefs = useRef({});
+  const esRef = useRef(null);
 
   useEffect(() => {
-    getEvent(id).then(setEvent);
-    
-    const es = new EventSource(`${API_BASE}/events/${id}/stream`);
-    
-    es.onmessage = ev => {
-      const msg = JSON.parse(ev.data);
-      if (msg.type === 'init') {
-        setEvent(e => ({ ...e, state: msg.data.state }));
-        setHistory(msg.data.history);
-        setPreviousTotal(msg.data.state?.total || 0);
-        setTotalViewers(msg.data.state?.total || 0);
+    getEvent(id).then(ev => {
+      setEvent(ev);
+      setPreviousTotal(ev.state?.total || 0);
+      setTotalViewers(ev.state?.total || 0);
+    });
+
+    const setupES = () => {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
       }
-      if (msg.type === 'tick') {
-        setEvent(e => ({ 
-          ...e, 
-          state: { 
-            total: msg.data.total, 
-            streams: Object.fromEntries(msg.data.streams.map(s => [s.id, s])) 
-          } 
-        }));
-        setHistory(h => [...h.slice(-29), { ts: msg.data.ts, total: msg.data.total }]);
-        setPreviousTotal(totalViewers);
-        setTotalViewers(msg.data.total);
-        // Historique par stream
-        setStreamsHistory(prev => {
-          const next = { ...prev };
-          for (const s of msg.data.streams) {
-            const arr = next[s.id] || [];
-            arr.push({ ts: msg.data.ts, current: s.current });
-            next[s.id] = arr.slice(-500);
-          }
-          return next;
-        });
+      const params = (historyMinutes === 'all' && event?.created_at)
+        ? `from=${encodeURIComponent(event.created_at)}&to=${encodeURIComponent(new Date().toISOString())}`
+        : (historyMinutes === 'all' ? `minutes=180` : `minutes=${historyMinutes}`);
+      esRef.current = new EventSource(`${API_BASE}/events/${id}/stream?${params}`);
+      esRef.current.onmessage = ev => {
+        const raw = ev.data;
+        if (!raw || raw[0] !== '{') return;
+        let msg;
+        try {
+          msg = JSON.parse(raw);
+        } catch {
+          return;
+        }
+        if (msg.type === 'init') {
+          setEvent(e => ({ ...e, state: msg.data.state }));
+          setHistory(msg.data.history);
+          setPreviousTotal(msg.data.state?.total || 0);
+          setTotalViewers(msg.data.state?.total || 0);
+        }
+        if (msg.type === 'tick') {
+          setEvent(e => ({ 
+            ...e, 
+            state: { 
+              total: msg.data.total, 
+              streams: Object.fromEntries(msg.data.streams.map(s => [s.id, s])) 
+            } 
+          }));
+          // Conserver l'historique sur toute la fenêtre sélectionnée
+          setHistory(h => {
+            const next = [...h, { ts: msg.data.ts, total: msg.data.total }];
+            const cutoff = (historyMinutes === 'all' && event?.created_at)
+              ? new Date(event.created_at).getTime()
+              : Date.now() - Number(historyMinutes) * 60 * 1000;
+            return next.filter(row => new Date(row.ts).getTime() >= cutoff);
+          });
+          setPreviousTotal(p => p);
+          setTotalViewers(msg.data.total);
+          // Historique par stream
+          setStreamsHistory(prev => {
+            const cutoff = (historyMinutes === 'all' && event?.created_at)
+              ? new Date(event.created_at).getTime()
+              : Date.now() - Number(historyMinutes) * 60 * 1000;
+            const next = { ...prev };
+            for (const s of msg.data.streams) {
+              const arr = next[s.id] || [];
+              arr.push({ ts: msg.data.ts, current: s.current });
+              next[s.id] = arr.filter(row => new Date(row.ts).getTime() >= cutoff);
+            }
+            return next;
+          });
+        }
+      };
+    };
+
+    setupES();
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (esRef.current) {
+          esRef.current.close();
+          esRef.current = null;
+        }
+      } else {
+        setupES();
       }
     };
-    
-    return () => es.close();
-  }, [id, totalViewers]);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (esRef.current) esRef.current.close();
+    };
+  }, [id, historyMinutes]);
+
+  // Charger l'historique JSON (incluant les streams) pour la fenêtre sélectionnée
+  useEffect(() => {
+    let aborted = false;
+    (async () => {
+      try {
+        // Chargement initial JSON: minutes ou depuis le début avec boucle afterTs
+        if (historyMinutes === 'all' && event?.created_at) {
+          let allHistory = [];
+          let allStreams = [];
+          let lastTs = null;
+          // Première requête avec from/to pour amorcer
+          let url = `${API_BASE}/events/${id}/history?streams=1&limit=5000&from=${encodeURIComponent(event.created_at)}&to=${encodeURIComponent(new Date().toISOString())}`;
+          while (!aborted) {
+            const res = await fetch(url);
+            if (!res.ok) break;
+            const ct = res.headers.get('content-type') || '';
+            if (!ct.includes('application/json')) break;
+            const data = await res.json();
+            if (aborted) return;
+            const h = Array.isArray(data.history) ? data.history : [];
+            const s = Array.isArray(data.streams) ? data.streams : [];
+            allHistory = allHistory.concat(h);
+            allStreams = allStreams.concat(s);
+            if (h.length < 5000 && s.length < 5000) break;
+            lastTs = (h.length ? h[h.length - 1].ts : (s.length ? s[s.length - 1].ts : lastTs));
+            if (!lastTs) break;
+            url = `${API_BASE}/events/${id}/history?streams=1&limit=5000&afterTs=${encodeURIComponent(lastTs)}`;
+          }
+          // Appliquer les données agrégées
+          setHistory(allHistory);
+          const grouped = {};
+          for (const row of allStreams) {
+            const arr = grouped[row.stream_id] || [];
+            arr.push({ ts: row.ts, current: row.concurrent_viewers });
+            grouped[row.stream_id] = arr;
+          }
+          setStreamsHistory(grouped);
+        } else {
+          const url = `${API_BASE}/events/${id}/history?minutes=${historyMinutes}&streams=1&limit=5000`;
+          const res = await fetch(url);
+          if (!res.ok) return; // SSE init fera le fallback
+          const ct = res.headers.get('content-type') || '';
+          if (!ct.includes('application/json')) return;
+          const data = await res.json();
+          if (aborted) return;
+          if (Array.isArray(data.history)) setHistory(data.history);
+          if (Array.isArray(data.streams)) {
+            const grouped = {};
+            for (const row of data.streams) {
+              const arr = grouped[row.stream_id] || [];
+              arr.push({ ts: row.ts, current: row.concurrent_viewers });
+              grouped[row.stream_id] = arr;
+            }
+            setStreamsHistory(grouped);
+          }
+        }
+      } catch (e) {
+        // silencieux: on garde l'affichage existant
+      }
+    })();
+    return () => { aborted = true; };
+  }, [id, historyMinutes, event?.created_at]);
 
   if (!event) {
     return (
@@ -351,9 +482,9 @@ export default function Dashboard() {
       tension: 0.4,
       pointBackgroundColor: '#0c2164ff',
       pointBorderColor: '#ffffff',
-      pointBorderWidth: 2,
-      pointRadius: 4,
-      pointHoverRadius: 6
+      pointBorderWidth: 0,
+      pointRadius: 0,
+      pointHoverRadius: 0
     }]
   };
 
@@ -370,6 +501,11 @@ export default function Dashboard() {
         bodyColor: '#ffffff',
         borderColor: '#0c2164ff',
         borderWidth: 1
+      },
+      decimation: {
+        enabled: true,
+        algorithm: 'lttb',
+        threshold: 1000
       }
     },
     scales: {
@@ -383,7 +519,8 @@ export default function Dashboard() {
         grid: { color: 'rgba(255, 255, 255, 0.1)' },
         ticks: { color: 'rgba(255, 255, 255, 0.7)' }
       }
-    }
+    },
+    animation: false
   };
 
   // Export helpers
@@ -559,7 +696,28 @@ export default function Dashboard() {
             <div style={{ height: '300px' }}>
               <Line ref={totalChartRef} data={data} options={options} />
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <label style={{ color: 'white', opacity: 0.9 }}>
+                Fenêtre:
+                <select
+                  value={historyMinutes}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setHistoryMinutes(v === 'all' ? 'all' : parseInt(v, 10));
+                  }}
+                  style={{ marginLeft: '0.5rem', padding: '0.25rem 0.5rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.3)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
+                >
+                  <option value="all">Depuis le début</option>
+                  <option value={60}>1h</option>
+                  <option value={180}>3h</option>
+                  <option value={360}>6h</option>
+                  <option value={720}>12h</option>
+                  <option value={1440}>24h</option>
+                  <option value={2880}>48h</option>
+                  <option value={4320}>72h</option>
+                  <option value={10080}>7j</option>
+                </select>
+              </label>
               <button
                 onClick={() => {
                   const chart = totalChartRef.current;
@@ -574,7 +732,20 @@ export default function Dashboard() {
                 Exporter PNG
               </button>
               <button
-                onClick={() => downloadCSV(`total_viewers_${id}.csv`, history.map(h => ({ ts: h.ts, total: h.total })))}
+                onClick={() => {
+                  const nowIso = new Date().toISOString();
+                  const url = (historyMinutes === 'all' && event?.created_at)
+                    ? `${API_BASE}/events/${id}/history.csv?from=${encodeURIComponent(event.created_at)}&to=${encodeURIComponent(nowIso)}`
+                    : `${API_BASE}/events/${id}/history.csv?minutes=${historyMinutes}`;
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = (historyMinutes === 'all')
+                    ? `event_${id}_history_all.csv`
+                    : `event_${id}_history_${historyMinutes}m.csv`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                }}
                 style={{
                   background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
                   color: 'white', border: 'none', padding: '0.5rem 1rem',
@@ -582,6 +753,45 @@ export default function Dashboard() {
                 }}
               >
                 Exporter CSV
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    setJobExporting(true); setJobProgress(0); setJobId(null);
+                    const payload = (historyMinutes === 'all' && event?.created_at)
+                      ? { type: 'total', from: event.created_at, to: new Date().toISOString() }
+                      : { type: 'total', minutes: historyMinutes };
+                    const res = await fetch(`${API_BASE}/events/${id}/export`, {
+                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (!data.jobId) throw new Error('jobId manquant');
+                    setJobId(data.jobId);
+                    const poll = async () => {
+                      const sres = await fetch(`${API_BASE}/exports/${data.jobId}/status`);
+                      const sdata = await sres.json();
+                      if (sdata.status === 'done') {
+                        setJobExporting(false);
+                        const url = `${API_BASE}/exports/${data.jobId}/download`;
+                        const a = document.createElement('a'); a.href = url; a.download = (historyMinutes === 'all' ? `event_${id}_history_all.csv` : `event_${id}_history_${historyMinutes}m.csv`); document.body.appendChild(a); a.click(); document.body.removeChild(a); return;
+                      }
+                      if (sdata.status === 'error') { setJobExporting(false); return; }
+                      setJobProgress(sdata.progress || 0);
+                      setTimeout(poll, 1000);
+                    };
+                    poll();
+                  } catch (e) {
+                    setJobExporting(false);
+                  }
+                }}
+                style={{
+                  background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
+                  color: 'white', border: 'none', padding: '0.5rem 1rem',
+                  borderRadius: '10px', cursor: 'pointer'
+                }}
+              >
+                {jobExporting ? `Job… ${jobProgress}` : 'Export asynchrone'}
               </button>
             </div>
           </div>
@@ -653,7 +863,20 @@ export default function Dashboard() {
                           PNG
                         </button>
                         <button
-                          onClick={() => downloadCSV(`${s.label.replace(/\s+/g,'_')}_viewers_${id}.csv`, rows)}
+                          onClick={() => {
+                            const nowIso = new Date().toISOString();
+                            const url = (historyMinutes === 'all' && event?.created_at)
+                              ? `${API_BASE}/events/${id}/streams/${s.id}/history.csv?from=${encodeURIComponent(event.created_at)}&to=${encodeURIComponent(nowIso)}`
+                              : `${API_BASE}/events/${id}/streams/${s.id}/history.csv?minutes=${historyMinutes}`;
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = (historyMinutes === 'all')
+                              ? `${s.label.replace(/\s+/g,'_')}_viewers_${id}_all.csv`
+                              : `${s.label.replace(/\s+/g,'_')}_viewers_${id}_${historyMinutes}m.csv`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                          }}
                           style={{
                             background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
                             color: 'white', border: 'none', padding: '0.4rem 0.8rem',
@@ -661,6 +884,39 @@ export default function Dashboard() {
                           }}
                         >
                           CSV
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const payload = (historyMinutes === 'all' && event?.created_at)
+                                ? { type: 'stream', sid: s.id, from: event.created_at, to: new Date().toISOString() }
+                                : { type: 'stream', sid: s.id, minutes: historyMinutes };
+                              const res = await fetch(`${API_BASE}/events/${id}/export`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload)
+                              });
+                              const data = await res.json();
+                              if (!data.jobId) return;
+                              const poll = async () => {
+                                const sres = await fetch(`${API_BASE}/exports/${data.jobId}/status`);
+                                const sdata = await sres.json();
+                                if (sdata.status === 'done') {
+                                  const url = `${API_BASE}/exports/${data.jobId}/download`;
+                                  const a = document.createElement('a'); a.href = url; a.download = (historyMinutes === 'all' ? `${s.label.replace(/\s+/g,'_')}_viewers_${id}_all.csv` : `${s.label.replace(/\s+/g,'_')}_viewers_${id}_${historyMinutes}m.csv`); document.body.appendChild(a); a.click(); document.body.removeChild(a); return;
+                                }
+                                if (sdata.status === 'error') { return; }
+                                setTimeout(poll, 1000);
+                              };
+                              poll();
+                            } catch {}
+                          }}
+                          style={{
+                            background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
+                            color: 'white', border: 'none', padding: '0.4rem 0.8rem',
+                            borderRadius: '8px', cursor: 'pointer'
+                          }}
+                        >
+                          Job
                         </button>
                       </div>
                     </div>

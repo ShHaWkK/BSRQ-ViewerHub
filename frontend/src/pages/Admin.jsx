@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { getEvents, createEvent } from '../api.js';
+import { getEvents, createEvent, updateEvent } from '../api.js';
+import Modal from '../components/Modal.jsx';
 import customLogo from '../assets/custom-logo.svg';
 
 // Composant de fond animé
@@ -10,6 +11,8 @@ const AnimatedBackground = () => {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) return;
 
     const ctx = canvas.getContext('2d');
     canvas.width = window.innerWidth;
@@ -27,6 +30,7 @@ const AnimatedBackground = () => {
     }
 
     const animate = () => {
+      if (document.hidden) return;
       ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -61,7 +65,14 @@ const AnimatedBackground = () => {
     };
 
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    const onVis = () => {
+      // rien à faire, l'animation est simplement stoppée quand hidden
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, []);
 
   return (
@@ -82,7 +93,7 @@ const AnimatedBackground = () => {
 };
 
 // Composant Event Card animé
-const EventCard = ({ event, index }) => {
+const EventCard = ({ event, index, onEdit }) => {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
@@ -133,16 +144,29 @@ const EventCard = ({ event, index }) => {
             {event.name}
           </h3>
           
-          <div style={{
-            background: 'linear-gradient(45deg, #10b981, #3b82f6)',
-            borderRadius: '12px',
-            padding: '0.5rem 1rem',
-            fontSize: '0.9rem',
-            fontWeight: '600',
-            color: 'white',
-            boxShadow: '0 4px 15px rgba(16, 185, 129, 0.3)'
-          }}>
-            ⏱️ {event.pollIntervalSec}s
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <div style={{
+              background: 'linear-gradient(45deg, #10b981, #3b82f6)',
+              borderRadius: '12px',
+              padding: '0.4rem 0.75rem',
+              fontSize: '0.85rem',
+              fontWeight: '600',
+              color: 'white',
+              boxShadow: '0 4px 15px rgba(16, 185, 129, 0.3)'
+            }}>
+              ⏱️ {event.pollIntervalSec}s
+            </div>
+            <div style={{
+              background: event.is_paused ? 'linear-gradient(45deg, #f59e0b, #ef4444)' : 'linear-gradient(45deg, #16a34a, #10b981)',
+              borderRadius: '999px',
+              padding: '0.35rem 0.75rem',
+              fontSize: '0.8rem',
+              fontWeight: '700',
+              color: 'white',
+              boxShadow: event.is_paused ? '0 4px 15px rgba(245, 158, 11, 0.4)' : '0 4px 15px rgba(16, 185, 129, 0.4)'
+            }}>
+              {event.is_paused ? '⏸️ En pause' : '▶️ Actif'}
+            </div>
           </div>
         </div>
 
@@ -174,13 +198,7 @@ const EventCard = ({ event, index }) => {
           </Link>
           
           <button
-            onClick={() => {
-              const newName = prompt('Nouveau nom de l\'évènement:', event.name);
-              if (newName && newName.trim() && newName !== event.name) {
-                // TODO: Implémenter la fonction de modification
-                alert(`Modification de "${event.name}" vers "${newName}" (fonctionnalité à implémenter)`);
-              }
-            }}
+            onClick={() => onEdit(event)}
             style={{
               background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
               color: 'white',
@@ -216,12 +234,28 @@ export default function Admin() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [banner, setBanner] = useState('');
+  const [editOpen, setEditOpen] = useState(false);
+  const [editEvent, setEditEvent] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editInterval, setEditInterval] = useState('5');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [confirmHighInterval, setConfirmHighInterval] = useState(false);
+  const [confirmCountdown, setConfirmCountdown] = useState(0);
+  const countdownRef = useRef(null);
 
   useEffect(() => {
-    getEvents().then(events => {
-      setEvents(events);
-      setIsLoading(false);
-    });
+    getEvents()
+      .then(events => {
+        setEvents(events);
+        setIsLoading(false);
+      })
+      .catch(err => {
+        console.error('Échec getEvents:', err);
+        setError(err.message || 'Impossible de charger les évènements');
+        setIsLoading(false);
+      });
   }, []);
 
   const submit = async e => {
@@ -268,7 +302,7 @@ export default function Admin() {
         justifyContent: 'center',
         color: 'white'
       }}>
-        <div style={{ textAlign: 'center' }}>
+        <div style={{ textAlign: 'center', width: 'min(700px, 92vw)' }}>
           <div style={{
             width: '80px',
             height: '80px',
@@ -279,6 +313,11 @@ export default function Admin() {
             margin: '0 auto 2rem'
           }} />
           <h2 style={{ fontSize: '1.5rem', fontWeight: '600' }}>Chargement des évènements...</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginTop: '2rem' }}>
+            {[0,1,2].map(i => (
+              <div key={i} className="skeleton" style={{ height: '140px' }} />
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -349,6 +388,20 @@ export default function Admin() {
         </header>
 
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          {banner && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(16,185,129,0.2) 0%, rgba(16,185,129,0.1) 100%)',
+              border: '1px solid rgba(16,185,129,0.3)',
+              borderRadius: '15px',
+              padding: '1rem',
+              marginBottom: '1.5rem',
+              color: '#10b981',
+              fontSize: '0.95rem',
+              fontWeight: '600'
+            }}>
+              ✅ {banner}
+            </div>
+          )}
           {/* Formulaire de création */}
           <div style={{
             background: 'linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%)',
@@ -418,7 +471,7 @@ export default function Admin() {
                 <input
                   type="number"
                   min="2"
-                  placeholder="⏱️ Interval (s)"
+                  placeholder="⏱ Interval (s)"
                   value={form.pollIntervalSec}
                   onChange={e => setForm({ ...form, pollIntervalSec: e.target.value })}
                   style={{
@@ -513,13 +566,138 @@ export default function Admin() {
             ) : (
               <div style={{ display: 'grid', gap: '1rem' }}>
                 {events.map((event, index) => (
-                  <EventCard key={event.id} event={event} index={index} />
+                  <EventCard key={event.id} event={event} index={index} onEdit={(ev) => {
+                    setEditEvent(ev);
+                    setEditName(ev.name || '');
+                    setEditInterval(String(ev.pollIntervalSec || 5));
+                    setEditError('');
+                    setConfirmHighInterval(false);
+                    setConfirmCountdown(0);
+                    setEditOpen(true);
+                  }} />
                 ))}
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* Modal d'édition */}
+      <Modal
+        isOpen={editOpen}
+        title="✏️ Modifier l'évènement"
+        onClose={() => {
+          setEditOpen(false);
+          setConfirmHighInterval(false);
+          setConfirmCountdown(0);
+          if (countdownRef.current) {
+            clearInterval(countdownRef.current);
+            countdownRef.current = null;
+          }
+        }}
+        onConfirm={async () => {
+          setEditSubmitting(true);
+          setEditError('');
+          try {
+            if (!editName.trim()) throw new Error('Le nom est requis');
+            const interval = parseInt(editInterval);
+            if (isNaN(interval) || interval < 2) throw new Error('Intervalle \u2265 2s');
+            if (interval > 60 && !confirmHighInterval) {
+              setConfirmHighInterval(true);
+              setConfirmCountdown(3);
+              if (countdownRef.current) clearInterval(countdownRef.current);
+              countdownRef.current = setInterval(() => {
+                setConfirmCountdown((c) => {
+                  if (c <= 1) {
+                    clearInterval(countdownRef.current);
+                    countdownRef.current = null;
+                    return 0;
+                  }
+                  return c - 1;
+                });
+              }, 1000);
+              setEditSubmitting(false);
+              return;
+            }
+            const updated = await updateEvent(editEvent.id, { name: editName.trim(), pollIntervalSec: interval });
+            setEvents(evts => evts.map(e => e.id === editEvent.id ? { ...e, name: updated.name, pollIntervalSec: updated.pollIntervalSec } : e));
+            setEditSubmitting(false);
+            setEditOpen(false);
+            setBanner('Évènement mis à jour avec succès');
+            setTimeout(() => setBanner(''), 3000);
+          } catch (err) {
+            console.error('Échec de la mise à jour', err);
+            setEditError(err.message || 'Erreur inconnue');
+            setEditSubmitting(false);
+          }
+        }}
+        confirmText={confirmHighInterval ? (confirmCountdown > 0 ? `Confirmer (${confirmCountdown}s)` : 'Confirmer') : 'Enregistrer'}
+        isSubmitting={editSubmitting}
+        disableConfirm={confirmHighInterval && confirmCountdown > 0}
+        ariaDescribedBy={confirmHighInterval ? 'high-interval-tip' : undefined}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: '1rem' }}>
+          <label htmlFor="edit-name" style={{ position: 'absolute', left: '-10000px' }}>Nom de l'évènement</label>
+          <input
+            type="text"
+            id="edit-name"
+            aria-label="Nom de l'évènement"
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            placeholder="Nom de l'évènement"
+            style={{
+              background: 'rgba(255,255,255,0.1)',
+              border: '2px solid rgba(255,255,255,0.2)',
+              borderRadius: '12px',
+              padding: '0.75rem 1rem',
+              color: 'white'
+            }}
+          />
+          <label htmlFor="edit-interval" style={{ position: 'absolute', left: '-10000px' }}>Intervalle de polling (secondes)</label>
+          <input
+            type="number"
+            min="2"
+            id="edit-interval"
+            aria-label="Intervalle de polling (secondes)"
+            value={editInterval}
+            onChange={(e) => setEditInterval(e.target.value)}
+            placeholder="Intervalle (s)"
+            style={{
+              background: 'rgba(255,255,255,0.1)',
+              border: '2px solid rgba(255,255,255,0.2)',
+              borderRadius: '12px',
+              padding: '0.75rem 1rem',
+              color: 'white'
+            }}
+          />
+        </div>
+        {confirmHighInterval && (
+          <div id="high-interval-tip" style={{
+            marginTop: '0.75rem',
+            color: '#f59e0b',
+            background: 'rgba(245, 158, 11, 0.1)',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+            borderRadius: '10px',
+            padding: '0.5rem 0.75rem',
+            fontSize: '0.9rem'
+          }}>
+            ⚠️ Intervalle élevé détecté (60s). Appuyez sur "Confirmer" pour valider.
+          </div>
+        )}
+        {editError && (
+          <div style={{
+            marginTop: '0.75rem',
+            color: '#ff6b6b',
+            background: 'rgba(255,107,107,0.1)',
+            border: '1px solid rgba(255,107,107,0.3)',
+            borderRadius: '10px',
+            padding: '0.5rem 0.75rem',
+            fontSize: '0.9rem'
+          }}>
+            ⚠️ {editError}
+          </div>
+        )}
+      </Modal>
 
       {/* CSS Animations */}
       <style>{`

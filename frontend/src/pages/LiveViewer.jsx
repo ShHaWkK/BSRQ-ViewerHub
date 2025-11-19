@@ -9,6 +9,8 @@ const SoundWave = () => {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) return;
 
     const ctx = canvas.getContext('2d');
     canvas.width = window.innerWidth;
@@ -227,33 +229,56 @@ export default function LiveViewer() {
   const { id } = useParams();
   const [event, setEvent] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const esRef = useRef(null);
 
   useEffect(() => {
-    getEvent(id).then(event => {
-      setEvent(event);
-      setIsLoading(false);
-    });
+    getEvent(id)
+      .then(event => {
+        setEvent(event);
+        setIsLoading(false);
+      })
+      .catch(err => {
+        console.error('Échec getEvent:', err);
+        setIsLoading(false);
+      });
     
     // Connexion SSE pour les données en temps réel
-    const es = new EventSource(`${import.meta.env.VITE_API_URL || 'http://localhost:4000'}/events/${id}/stream`);
-    
-    es.onmessage = ev => {
-      const msg = JSON.parse(ev.data);
-      if (msg.type === 'init') {
-        setEvent(e => ({ ...e, state: msg.data.state }));
-      }
-      if (msg.type === 'tick') {
-        setEvent(e => ({ 
-          ...e, 
-          state: { 
-            total: msg.data.total, 
-            streams: Object.fromEntries(msg.data.streams.map(s => [s.id, s])) 
-          } 
-        }));
+    const setupES = () => {
+      if (esRef.current) { esRef.current.close(); esRef.current = null; }
+      esRef.current = new EventSource(`${import.meta.env.VITE_API_URL || 'http://localhost:4000'}/events/${id}/stream`);
+      esRef.current.onmessage = ev => {
+        const raw = ev.data;
+        if (!raw || raw[0] !== '{') return;
+        let msg;
+        try { msg = JSON.parse(raw); } catch { return; }
+        if (msg.type === 'init') {
+          setEvent(e => ({ ...e, state: msg.data.state }));
+        }
+        if (msg.type === 'tick') {
+          setEvent(e => ({ 
+            ...e, 
+            state: { 
+              total: msg.data.total, 
+              streams: Object.fromEntries(msg.data.streams.map(s => [s.id, s])) 
+            } 
+          }));
+        }
+      };
+    };
+    setupES();
+    const onVis = () => {
+      if (document.hidden) {
+        if (esRef.current) { esRef.current.close(); esRef.current = null; }
+      } else {
+        setupES();
       }
     };
+    document.addEventListener('visibilitychange', onVis);
     
-    return () => es.close();
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      if (esRef.current) esRef.current.close();
+    };
   }, [id]);
 
   if (isLoading) {

@@ -1,6 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import compression from 'compression';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import pool, { migrate } from './db.js';
 import { extractVideoId, generateAutoLabel } from '../utils/youtube.js';
@@ -14,12 +18,63 @@ app.use(express.json());
 // Autoriser toutes les origines en développement pour éviter les erreurs CORS locales
 app.use(cors());
 
-// Rate limit simple pour endpoints admin
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
-app.use('/events', limiter);
+// Compression conditionnelle: ne pas compresser les flux SSE
+const shouldCompress = (req, res) => {
+  if (req.path.endsWith('/stream')) return false;
+  return compression.filter(req, res);
+};
+app.use(compression({ filter: shouldCompress }));
+
+// Rate limit uniquement pour les requêtes NON-GET (évite de limiter l'SSE et les lectures)
+const adminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.use((req, res, next) => {
+  if (req.path.startsWith('/events') && req.method !== 'GET') {
+    return adminLimiter(req, res, next);
+  }
+  next();
+});
 
 const events = new Map(); // état en mémoire
 const clients = new Map(); // SSE clients par évènement
+// Cache simple pour titres YouTube
+const titleCache = new Map(); // videoId -> { title, ts }
+const TITLE_TTL_MS = 60 * 60 * 1000; // 1h
+
+// Configuration d'historique (minutes) au-delà de 1440
+const MAX_HISTORY_MINUTES = (() => {
+  const v = parseInt(process.env.MAX_HISTORY_MINUTES || '10080', 10); // défaut: 7 jours
+  return Number.isFinite(v) && v > 0 ? v : 10080;
+})();
+
+function clampMinutes(raw, def) {
+  let m = parseInt(raw ?? def, 10);
+  if (!Number.isFinite(m) || m <= 0) m = def;
+  return Math.min(m, MAX_HISTORY_MINUTES);
+}
+
+function parseRange(req, defaultMinutes) {
+  // Permet soit minutes, soit from/to ISO
+  const fromStr = req.query.from;
+  const toStr = req.query.to;
+  let from = undefined;
+  let to = undefined;
+  if (fromStr && toStr) {
+    const f = new Date(fromStr);
+    const t = new Date(toStr);
+    if (!isNaN(f.getTime()) && !isNaN(t.getTime()) && f <= t) {
+      from = f;
+      to = t;
+    }
+  }
+  const minutes = clampMinutes(req.query.minutes, defaultMinutes);
+  return { from, to, minutes };
+}
 
 async function init() {
   await migrate();
@@ -33,6 +88,7 @@ async function init() {
       stream.is_favorite = stream.is_favorite || false;
       stream.failure_count = stream.failure_count || 0;
       stream.is_disabled = stream.is_disabled || false;
+      stream.next_poll_at = new Date();
     }
     events.set(ev.id, { ...ev, state: { total: 0, streams: {} } });
     startPolling(ev.id);
@@ -57,12 +113,17 @@ function startPolling(eventId) {
     // Filtrer les streams non désactivés ET non en pause individuellement
     const activeStreams = ev.streams.filter(s => !s.is_disabled && !s.is_paused);
     if (!activeStreams.length) return;
-    
-    const ids = activeStreams.map(s => s.video_id);
+    const now = new Date();
+    // Respecter l'intervalle personnalisé par stream (et backoff sur échecs)
+    const dueStreams = activeStreams.filter(s => {
+      const next = s.next_poll_at ? new Date(s.next_poll_at) : new Date(0);
+      return now >= next;
+    });
+    if (!dueStreams.length) return;
+    const ids = dueStreams.map(s => s.video_id);
     const chunks = [];
     while (ids.length) chunks.push(ids.splice(0, 50));
     let total = 0;
-    const now = new Date();
     const streamStates = {};
     
     for (const chunk of chunks) {
@@ -75,7 +136,7 @@ function startPolling(eventId) {
         console.error('Erreur YouTube', e);
         // Incrémenter le compteur d'échecs pour tous les streams de ce chunk
         for (const videoId of chunk) {
-          const stream = activeStreams.find(s => s.video_id === videoId);
+          const stream = dueStreams.find(s => s.video_id === videoId);
           if (stream) {
             await handleStreamFailure(stream, ev.id);
           }
@@ -86,7 +147,7 @@ function startPolling(eventId) {
       // Traiter les réponses réussies
       for (const item of data.items || []) {
         const id = item.id;
-        const stream = activeStreams.find(s => s.video_id === id);
+        const stream = dueStreams.find(s => s.video_id === id);
         if (!stream) continue;
         
         const viewers = item.liveStreamingDetails?.concurrentViewers ? parseInt(item.liveStreamingDetails.concurrentViewers) : 0;
@@ -108,23 +169,40 @@ function startPolling(eventId) {
         };
         total += viewers;
         await pool.query('INSERT INTO stream_samples(event_id, stream_id, ts, concurrent_viewers) VALUES($1,$2,$3,$4)', [ev.id, stream.id, now, viewers]);
+        // Planifier prochain poll selon intervalle personnalisé
+        const intervalSec = stream.custom_interval_sec || (ev.poll_interval_ms / 1000);
+        stream.next_poll_at = new Date(now.getTime() + Math.max(2, intervalSec) * 1000);
       }
       
       // Gérer les streams qui n'ont pas de réponse (potentiellement en échec)
       for (const videoId of chunk) {
-        const stream = activeStreams.find(s => s.video_id === videoId);
+        const stream = dueStreams.find(s => s.video_id === videoId);
         if (stream && !data.items?.find(item => item.id === videoId)) {
           await handleStreamFailure(stream, ev.id);
         }
       }
     }
     
-    ev.state = { total, streams: streamStates };
-    await pool.query('INSERT INTO samples(event_id, ts, total) VALUES($1,$2,$3)', [ev.id, now, total]);
-    // Notifier SSE
-    const payload = JSON.stringify({ type: 'tick', data: { ts: now, total, streams: Object.values(streamStates) } });
-    const set = clients.get(ev.id) || new Set();
-    for (const res of set) res.write(`data: ${payload}\n\n`);
+    // Si aucun stream dû, rien à notifier
+    // Mettre à jour total à partir de la dernière valeur connue pour les streams non mis à jour
+    if (!Object.keys(streamStates).length) return;
+    const prev = ev.state || { total: 0, streams: {} };
+    const changedTotal = total !== prev.total;
+    let streamsChanged = false;
+    for (const [sid, st] of Object.entries(streamStates)) {
+      const prevSt = prev.streams[sid];
+      if (!prevSt || prevSt.current !== st.current || prevSt.online !== st.online) { streamsChanged = true; break; }
+    }
+    // Mise à jour de l'état
+    ev.state = { total, streams: { ...prev.streams, ...streamStates } };
+    // Écriture DB et SSE uniquement si changement
+    const writeUnchanged = process.env.WRITE_UNCHANGED_SAMPLES === 'true';
+    if (changedTotal || streamsChanged || writeUnchanged) {
+      await pool.query('INSERT INTO samples(event_id, ts, total) VALUES($1,$2,$3)', [ev.id, now, total]);
+      const payload = JSON.stringify({ type: 'tick', data: { ts: now, total, streams: Object.values(ev.state.streams) } });
+      const set = clients.get(ev.id) || new Set();
+      for (const res of set) res.write(`data: ${payload}\n\n`);
+    }
   }
   poll();
   ev.timer && clearInterval(ev.timer);
@@ -152,6 +230,10 @@ async function handleStreamFailure(stream, eventId) {
     stream.last_failure_at = now;
     console.log(`Échec ${newFailureCount}/3 pour le stream ${stream.label} (${stream.video_id})`);
   }
+  // Backoff: repousser prochain poll selon le nombre d'échecs
+  const intervalSec = stream.custom_interval_sec ||  (getEvent(eventId).poll_interval_ms / 1000);
+  const backoffFactor = Math.min(4, 1 + newFailureCount); // jusqu'à x4
+  stream.next_poll_at = new Date(now.getTime() + Math.max(2, intervalSec * backoffFactor) * 1000);
 }
 
 async function seed() {
@@ -179,7 +261,7 @@ app.post('/events', async (req, res) => {
 });
 
 app.get('/events', (req, res) => {
-  res.json(Array.from(events.values()).map(e => ({ id: e.id, name: e.name, pollIntervalSec: e.poll_interval_ms / 1000 })));
+  res.json(Array.from(events.values()).map(e => ({ id: e.id, name: e.name, pollIntervalSec: e.poll_interval_ms / 1000, is_paused: !!e.is_paused })));
 });
 
 app.get('/events/:id', (req, res) => {
@@ -187,6 +269,31 @@ app.get('/events/:id', (req, res) => {
     const ev = getEvent(req.params.id);
     res.json({ id: ev.id, name: ev.name, pollIntervalSec: ev.poll_interval_ms / 1000, streams: ev.streams, state: ev.state });
   } catch {
+    res.status(404).end();
+  }
+});
+
+// Mise à jour du nom et de l'intervalle d'un évènement
+app.put('/events/:id', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : ev.name;
+    let pollMs = ev.poll_interval_ms;
+    if (req.body.pollIntervalSec !== undefined) {
+      const sec = parseInt(req.body.pollIntervalSec, 10);
+      if (!Number.isFinite(sec) || sec < 2 || sec > 600) {
+        return res.status(400).json({ error: 'pollIntervalSec invalide (2-600)' });
+      }
+      pollMs = sec * 1000;
+    }
+    await pool.query('UPDATE events SET name=$1, poll_interval_ms=$2 WHERE id=$3', [name, pollMs, ev.id]);
+    ev.name = name;
+    ev.poll_interval_ms = pollMs;
+    if (ev.timer) { clearInterval(ev.timer); ev.timer = null; }
+    if (!ev.is_paused) startPolling(ev.id);
+    res.json({ id: ev.id, name: ev.name, pollIntervalSec: ev.poll_interval_ms / 1000 });
+  } catch (e) {
+    console.error('PUT /events/:id failed', e);
     res.status(404).end();
   }
 });
@@ -238,18 +345,259 @@ app.get('/events/:id/stream', async (req, res) => {
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive'
     });
-    res.write('\n');
     const set = clients.get(ev.id) || new Set();
     set.add(res);
     clients.set(ev.id, set);
     req.on('close', () => set.delete(res));
-    // Historique 60 min
-    const { rows } = await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts > NOW() - INTERVAL \'60 minutes\' ORDER BY ts', [ev.id]);
+    // Historique configurable (par défaut 60 min) et limité par MAX_HISTORY_MINUTES
+    const { from, to, minutes } = parseRange(req, 60);
+    let rows;
+    if (from && to) {
+      rows = (await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts BETWEEN $2 AND $3 ORDER BY ts', [ev.id, from, to])).rows;
+    } else {
+      const intervalStr = `${minutes} minutes`;
+      rows = (await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts > NOW() - $2::interval ORDER BY ts', [ev.id, intervalStr])).rows;
+    }
     const payload = JSON.stringify({ type: 'init', data: { state: ev.state, history: rows } });
     res.write(`data: ${payload}\n\n`);
   } catch {
     res.status(404).end();
   }
+});
+
+// Historique JSON
+app.get('/events/:id/history', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    const { from, to, minutes } = parseRange(req, 180);
+    const limit = Math.min(parseInt(req.query.limit || '20000', 10) || 20000, 200000);
+    const afterTs = req.query.afterTs ? new Date(req.query.afterTs) : undefined;
+    const baseParams = [ev.id];
+    let rows;
+    if (from && to) {
+      rows = (await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts BETWEEN $2 AND $3 ORDER BY ts LIMIT $4', [ev.id, from, to, limit])).rows;
+    } else if (afterTs && !isNaN(afterTs.getTime())) {
+      const intervalStr = `${minutes} minutes`;
+      rows = (await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts > $2 ORDER BY ts LIMIT $3', [ev.id, afterTs, limit])).rows;
+    } else {
+      const intervalStr = `${minutes} minutes`;
+      rows = (await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts > NOW() - $2::interval ORDER BY ts LIMIT $3', [ev.id, intervalStr, limit])).rows;
+    }
+    let streamsRows = [];
+    if (req.query.streams === '1' || req.query.streams === 'true') {
+      if (from && to) {
+        const r = await pool.query('SELECT ts, stream_id, concurrent_viewers FROM stream_samples WHERE event_id=$1 AND ts BETWEEN $2 AND $3 ORDER BY ts LIMIT $4', [ev.id, from, to, limit]);
+        streamsRows = r.rows;
+      } else if (afterTs && !isNaN(afterTs.getTime())) {
+        const r = await pool.query('SELECT ts, stream_id, concurrent_viewers FROM stream_samples WHERE event_id=$1 AND ts > $2 ORDER BY ts LIMIT $3', [ev.id, afterTs, limit]);
+        streamsRows = r.rows;
+      } else {
+        const intervalStr = `${minutes} minutes`;
+        const r = await pool.query('SELECT ts, stream_id, concurrent_viewers FROM stream_samples WHERE event_id=$1 AND ts > NOW() - $2::interval ORDER BY ts LIMIT $3', [ev.id, intervalStr, limit]);
+        streamsRows = r.rows;
+      }
+    }
+    res.json({ history: rows, streams: streamsRows });
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Export CSV des totaux
+app.get('/events/:id/history.csv', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    const { from, to, minutes } = parseRange(req, 180);
+    const batch = Math.min(parseInt(req.query.batch || '20000', 10) || 20000, 200000);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="event_${ev.id}_history_${minutes}m.csv"`);
+    res.setHeader('Transfer-Encoding', 'chunked');
+    if (res.flushHeaders) res.flushHeaders();
+    res.write('timestamp,total\n');
+    let offset = 0;
+    while (true) {
+      let rows;
+      if (from && to) {
+        rows = (await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts BETWEEN $2 AND $3 ORDER BY ts LIMIT $4 OFFSET $5', [ev.id, from, to, batch, offset])).rows;
+      } else {
+        const intervalStr = `${minutes} minutes`;
+        rows = (await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts > NOW() - $2::interval ORDER BY ts LIMIT $3 OFFSET $4', [ev.id, intervalStr, batch, offset])).rows;
+      }
+      if (!rows.length) break;
+      for (const row of rows) {
+        const ts = new Date(row.ts).toISOString();
+        res.write(`${ts},${row.total}\n`);
+      }
+      offset += rows.length;
+    }
+    res.end();
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Export CSV par stream
+app.get('/events/:id/streams/history.csv', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    const { from, to, minutes } = parseRange(req, 180);
+    const batch = Math.min(parseInt(req.query.batch || '20000', 10) || 20000, 200000);
+    const labelMap = new Map(ev.streams.map(s => [s.id, s.label]));
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="event_${ev.id}_streams_history_${minutes}m.csv"`);
+    res.setHeader('Transfer-Encoding', 'chunked');
+    if (res.flushHeaders) res.flushHeaders();
+    res.write('timestamp,stream_id,label,viewers\n');
+    let offset = 0;
+    while (true) {
+      let rows;
+      if (from && to) {
+        rows = (await pool.query('SELECT ts, stream_id, concurrent_viewers FROM stream_samples WHERE event_id=$1 AND ts BETWEEN $2 AND $3 ORDER BY ts LIMIT $4 OFFSET $5', [ev.id, from, to, batch, offset])).rows;
+      } else {
+        const intervalStr = `${minutes} minutes`;
+        rows = (await pool.query('SELECT ts, stream_id, concurrent_viewers FROM stream_samples WHERE event_id=$1 AND ts > NOW() - $2::interval ORDER BY ts LIMIT $3 OFFSET $4', [ev.id, intervalStr, batch, offset])).rows;
+      }
+      if (!rows.length) break;
+      for (const row of rows) {
+        const ts = new Date(row.ts).toISOString();
+        const label = labelMap.get(row.stream_id) || '';
+        res.write(`${ts},${row.stream_id},${JSON.stringify(label)},${row.concurrent_viewers}\n`);
+      }
+      offset += rows.length;
+    }
+    res.end();
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Export CSV pour un stream spécifique
+app.get('/events/:id/streams/:sid/history.csv', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    const sid = req.params.sid;
+    const { from, to, minutes } = parseRange(req, 180);
+    const batch = Math.min(parseInt(req.query.batch || '20000', 10) || 20000, 200000);
+    const label = ev.streams.find(s => s.id === sid)?.label || '';
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="event_${ev.id}_${sid}_history_${minutes}m.csv"`);
+    res.setHeader('Transfer-Encoding', 'chunked');
+    if (res.flushHeaders) res.flushHeaders();
+    res.write('timestamp,stream_id,label,viewers\n');
+    let offset = 0;
+    while (true) {
+      let rows;
+      if (from && to) {
+        rows = (await pool.query('SELECT ts, concurrent_viewers FROM stream_samples WHERE event_id=$1 AND stream_id=$2 AND ts BETWEEN $3 AND $4 ORDER BY ts LIMIT $5 OFFSET $6', [ev.id, sid, from, to, batch, offset])).rows;
+      } else {
+        const intervalStr = `${minutes} minutes`;
+        rows = (await pool.query('SELECT ts, concurrent_viewers FROM stream_samples WHERE event_id=$1 AND stream_id=$2 AND ts > NOW() - $3::interval ORDER BY ts LIMIT $4 OFFSET $5', [ev.id, sid, intervalStr, batch, offset])).rows;
+      }
+      if (!rows.length) break;
+      for (const row of rows) {
+        const ts = new Date(row.ts).toISOString();
+        res.write(`${ts},${sid},${JSON.stringify(label)},${row.concurrent_viewers}\n`);
+      }
+      offset += rows.length;
+    }
+    res.end();
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Exports asynchrones basiques (job en mémoire)
+const exportJobs = new Map();
+app.post('/events/:id/export', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    const { type = 'total', sid, minutes, from, to } = req.body || {};
+    const jobId = genId();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'viewerhub-'));
+    const filePath = path.join(tmpDir, `${ev.id}-${type}-${Date.now()}.csv`);
+    exportJobs.set(jobId, { status: 'pending', filePath, type, progress: 0, error: null });
+    res.json({ jobId });
+    setImmediate(async () => {
+      const update = (patch) => exportJobs.set(jobId, { ...exportJobs.get(jobId), ...patch });
+      try {
+        update({ status: 'running' });
+        const ws = fs.createWriteStream(filePath, { encoding: 'utf8' });
+        ws.write('timestamp');
+        if (type === 'total') {
+          ws.write(',total\n');
+        } else if (type === 'streams') {
+          ws.write(',stream_id,label,viewers\n');
+        } else if (type === 'stream' && sid) {
+          ws.write(',stream_id,label,viewers\n');
+        }
+        const { from: f, to: t, minutes: m } = { ...parseRange({ query: { minutes, from, to } }, 180) };
+        const batch = 50000;
+        let offset = 0;
+        const labelMap = new Map(ev.streams.map(s => [s.id, s.label]));
+        while (true) {
+          let rows = [];
+          if (type === 'total') {
+            if (f && t) {
+              rows = (await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts BETWEEN $2 AND $3 ORDER BY ts LIMIT $4 OFFSET $5', [ev.id, f, t, batch, offset])).rows;
+            } else {
+              const intervalStr = `${m} minutes`;
+              rows = (await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts > NOW() - $2::interval ORDER BY ts LIMIT $3 OFFSET $4', [ev.id, intervalStr, batch, offset])).rows;
+            }
+          } else if (type === 'streams') {
+            if (f && t) {
+              rows = (await pool.query('SELECT ts, stream_id, concurrent_viewers FROM stream_samples WHERE event_id=$1 AND ts BETWEEN $2 AND $3 ORDER BY ts LIMIT $4 OFFSET $5', [ev.id, f, t, batch, offset])).rows;
+            } else {
+              const intervalStr = `${m} minutes`;
+              rows = (await pool.query('SELECT ts, stream_id, concurrent_viewers FROM stream_samples WHERE event_id=$1 AND ts > NOW() - $2::interval ORDER BY ts LIMIT $3 OFFSET $4', [ev.id, intervalStr, batch, offset])).rows;
+            }
+          } else if (type === 'stream' && sid) {
+            if (f && t) {
+              rows = (await pool.query('SELECT ts, concurrent_viewers FROM stream_samples WHERE event_id=$1 AND stream_id=$2 AND ts BETWEEN $3 AND $4 ORDER BY ts LIMIT $5 OFFSET $6', [ev.id, sid, f, t, batch, offset])).rows;
+            } else {
+              const intervalStr = `${m} minutes`;
+              rows = (await pool.query('SELECT ts, concurrent_viewers FROM stream_samples WHERE event_id=$1 AND stream_id=$2 AND ts > NOW() - $3::interval ORDER BY ts LIMIT $4 OFFSET $5', [ev.id, sid, intervalStr, batch, offset])).rows;
+            }
+          }
+          if (!rows.length) break;
+          for (const row of rows) {
+            const ts = new Date(row.ts).toISOString();
+            if (type === 'total') {
+              ws.write(`${ts},${row.total}\n`);
+            } else if (type === 'streams') {
+              const label = labelMap.get(row.stream_id) || '';
+              ws.write(`${ts},${row.stream_id},${JSON.stringify(label)},${row.concurrent_viewers}\n`);
+            } else if (type === 'stream' && sid) {
+              const label = labelMap.get(sid) || '';
+              ws.write(`${ts},${sid},${JSON.stringify(label)},${row.concurrent_viewers}\n`);
+            }
+          }
+          offset += rows.length;
+          update({ progress: offset });
+        }
+        ws.end();
+        update({ status: 'done' });
+      } catch (e) {
+        update({ status: 'error', error: String(e?.message || e) });
+      }
+    });
+  } catch (e) {
+    res.status(404).json({ error: 'not_found' });
+  }
+});
+
+app.get('/exports/:jobId/status', (req, res) => {
+  const job = exportJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'not_found' });
+  res.json({ status: job.status, progress: job.progress, type: job.type });
+});
+
+app.get('/exports/:jobId/download', (req, res) => {
+  const job = exportJobs.get(req.params.jobId);
+  if (!job || job.status !== 'done') return res.status(404).json({ error: 'not_ready' });
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${path.basename(job.filePath)}"`);
+  const rs = fs.createReadStream(job.filePath);
+  rs.pipe(res);
 });
 
 // Routes pour contrôler la pause/start
@@ -321,13 +669,22 @@ app.post('/events/:id/streams/:sid/reactivate', async (req, res) => {
 app.get('/youtube/title/:videoId', async (req, res) => {
   try {
     const videoId = req.params.videoId;
+    if (!process.env.YT_API_KEY) {
+      return res.status(400).json({ error: 'YT_API_KEY manquant' });
+    }
+
+    const cached = titleCache.get(videoId);
+    if (cached && (Date.now() - cached.ts) < TITLE_TTL_MS) {
+      return res.json({ title: cached.title });
+    }
+
     const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${process.env.YT_API_KEY}`;
-    
     const response = await fetch(url, { timeout: 10000 });
     const data = await response.json();
     
     if (data.items && data.items.length > 0) {
       const title = data.items[0].snippet.title;
+      titleCache.set(videoId, { title, ts: Date.now() });
       res.json({ title });
     } else {
       res.status(404).json({ error: 'Vidéo non trouvée' });
