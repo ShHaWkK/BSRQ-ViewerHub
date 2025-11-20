@@ -1,4 +1,7 @@
-const API = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+const PROTO = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+const DEFAULT_API = `${PROTO}//${HOST}:4000`;
+const API = import.meta.env.VITE_API_URL || DEFAULT_API;
 
 async function readJsonOrThrow(res) {
   const ct = res.headers.get('content-type') || '';

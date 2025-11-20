@@ -278,7 +278,9 @@ const DynamicStreamCard = ({ label, current, online }) => {
 
 export default function Dashboard() {
   const { id } = useParams();
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+  const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+  const API_BASE = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
   const [event, setEvent] = useState(null);
   const [history, setHistory] = useState([]);
   const [historyMinutes, setHistoryMinutes] = useState(60); // number or 'all' (par défaut 60 pour alléger)

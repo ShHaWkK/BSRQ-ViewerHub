@@ -245,7 +245,10 @@ export default function LiveViewer() {
     // Connexion SSE pour les données en temps réel
     const setupES = () => {
       if (esRef.current) { esRef.current.close(); esRef.current = null; }
-      esRef.current = new EventSource(`${import.meta.env.VITE_API_URL || 'http://localhost:4000'}/events/${id}/stream`);
+      const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+      const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+      const base = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
+      esRef.current = new EventSource(`${base}/events/${id}/stream`);
       esRef.current.onmessage = ev => {
         const raw = ev.data;
         if (!raw || raw[0] !== '{') return;

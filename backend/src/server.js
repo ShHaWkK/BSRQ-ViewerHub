@@ -1,3 +1,8 @@
+/*
+Author : ShHawk 
+
+*/
+
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
@@ -17,6 +22,8 @@ const app = express();
 app.use(express.json());
 // Autoriser toutes les origines en développement pour éviter les erreurs CORS locales
 app.use(cors());
+// Répondre aux préflight OPTIONS de manière générique (inclut SSE)
+app.options('*', cors());
 
 // Compression conditionnelle: ne pas compresser les flux SSE
 const shouldCompress = (req, res) => {
@@ -261,13 +268,13 @@ app.post('/events', async (req, res) => {
 });
 
 app.get('/events', (req, res) => {
-  res.json(Array.from(events.values()).map(e => ({ id: e.id, name: e.name, pollIntervalSec: e.poll_interval_ms / 1000, is_paused: !!e.is_paused })));
+  res.json(Array.from(events.values()).map(e => ({ id: e.id, name: e.name, pollIntervalSec: e.poll_interval_ms / 1000, is_paused: !!e.is_paused, created_at: e.created_at })));
 });
 
 app.get('/events/:id', (req, res) => {
   try {
     const ev = getEvent(req.params.id);
-    res.json({ id: ev.id, name: ev.name, pollIntervalSec: ev.poll_interval_ms / 1000, streams: ev.streams, state: ev.state });
+    res.json({ id: ev.id, name: ev.name, pollIntervalSec: ev.poll_interval_ms / 1000, streams: ev.streams, state: ev.state, created_at: ev.created_at });
   } catch {
     res.status(404).end();
   }
@@ -340,6 +347,14 @@ app.get('/events/:id/now', (req, res) => {
 app.get('/events/:id/stream', async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
+    // CORS pour SSE: autoriser l'origine et éviter le buffering proxy
+    const origin = req.headers.origin || '*';
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Vary', 'Origin');
+    // Indiquer aux reverse proxies (ex: Nginx) de ne pas bufferiser le flux SSE
+    res.setHeader('X-Accel-Buffering', 'no');
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -363,6 +378,15 @@ app.get('/events/:id/stream', async (req, res) => {
   } catch {
     res.status(404).end();
   }
+});
+// Préflight dédié pour la route SSE (utile si le client envoie des headers custom)
+app.options('/events/:id/stream', (req, res) => {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Vary', 'Origin');
+  res.status(204).end();
 });
 
 // Historique JSON
