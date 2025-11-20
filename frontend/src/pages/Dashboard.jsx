@@ -281,16 +281,20 @@ export default function Dashboard() {
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
   const [event, setEvent] = useState(null);
   const [history, setHistory] = useState([]);
-  const [historyMinutes, setHistoryMinutes] = useState(180); // number or 'all'
+  const [historyMinutes, setHistoryMinutes] = useState(60); // number or 'all' (par défaut 60 pour alléger)
   const [totalViewers, setTotalViewers] = useState(0);
   const [previousTotal, setPreviousTotal] = useState(0);
   const [streamsHistory, setStreamsHistory] = useState({});
+  const [showStreamCharts, setShowStreamCharts] = useState(false);
   const [jobExporting, setJobExporting] = useState(false);
   const [jobProgress, setJobProgress] = useState(0);
   const [jobId, setJobId] = useState(null);
   const totalChartRef = useRef(null);
   const streamChartRefs = useRef({});
   const esRef = useRef(null);
+  const sseFlushTimerRef = useRef(null);
+  const sseBufferRef = useRef({ totals: [], streams: new Map(), lastState: null });
+  const SSE_THROTTLE_MS = 1000; // 1s
 
   useEffect(() => {
     getEvent(id).then(ev => {
@@ -318,42 +322,63 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
           return;
         }
         if (msg.type === 'init') {
+          sseBufferRef.current.lastState = msg.data.state;
           setEvent(e => ({ ...e, state: msg.data.state }));
           setHistory(msg.data.history);
           setPreviousTotal(msg.data.state?.total || 0);
           setTotalViewers(msg.data.state?.total || 0);
         }
         if (msg.type === 'tick') {
-          setEvent(e => ({ 
-            ...e, 
-            state: { 
-              total: msg.data.total, 
-              streams: Object.fromEntries(msg.data.streams.map(s => [s.id, s])) 
-            } 
-          }));
-          // Conserver l'historique sur toute la fenêtre sélectionnée
-          setHistory(h => {
-            const next = [...h, { ts: msg.data.ts, total: msg.data.total }];
-            const cutoff = (historyMinutes === 'all' && event?.created_at)
-              ? new Date(event.created_at).getTime()
-              : Date.now() - Number(historyMinutes) * 60 * 1000;
-            return next.filter(row => new Date(row.ts).getTime() >= cutoff);
-          });
-          setPreviousTotal(p => p);
-          setTotalViewers(msg.data.total);
-          // Historique par stream
-          setStreamsHistory(prev => {
-            const cutoff = (historyMinutes === 'all' && event?.created_at)
-              ? new Date(event.created_at).getTime()
-              : Date.now() - Number(historyMinutes) * 60 * 1000;
-            const next = { ...prev };
-            for (const s of msg.data.streams) {
-              const arr = next[s.id] || [];
-              arr.push({ ts: msg.data.ts, current: s.current });
-              next[s.id] = arr.filter(row => new Date(row.ts).getTime() >= cutoff);
-            }
-            return next;
-          });
+          // Bufferiser et flush avec throttling pour limiter les re-renders
+          sseBufferRef.current.lastState = {
+            total: msg.data.total,
+            streams: Object.fromEntries(msg.data.streams.map(s => [s.id, s]))
+          };
+          sseBufferRef.current.totals.push({ ts: msg.data.ts, total: msg.data.total });
+          for (const s of msg.data.streams) {
+            const list = sseBufferRef.current.streams.get(s.id) || [];
+            list.push({ ts: msg.data.ts, current: s.current });
+            sseBufferRef.current.streams.set(s.id, list);
+          }
+          const scheduleFlush = () => {
+            if (sseFlushTimerRef.current) return;
+            sseFlushTimerRef.current = setTimeout(() => {
+              sseFlushTimerRef.current = null;
+              const buf = sseBufferRef.current;
+              // Mettre à jour état courant (cartes)
+              if (buf.lastState) {
+                setEvent(e => ({ ...e, state: buf.lastState }));
+                setTotalViewers(buf.lastState.total || 0);
+              }
+              // Historique total
+              if (buf.totals.length) {
+                setHistory(h => {
+                  const next = h.concat(buf.totals);
+                  const cutoff = (historyMinutes === 'all' && event?.created_at)
+                    ? new Date(event.created_at).getTime()
+                    : Date.now() - Number(historyMinutes) * 60 * 1000;
+                  return next.filter(row => new Date(row.ts).getTime() >= cutoff);
+                });
+                buf.totals = [];
+              }
+              // Historique par stream
+              if (buf.streams.size) {
+                setStreamsHistory(prev => {
+                  const cutoff = (historyMinutes === 'all' && event?.created_at)
+                    ? new Date(event.created_at).getTime()
+                    : Date.now() - Number(historyMinutes) * 60 * 1000;
+                  const next = { ...prev };
+                  for (const [sid, arrNew] of buf.streams.entries()) {
+                    const arr = next[sid] || [];
+                    next[sid] = arr.concat(arrNew).filter(row => new Date(row.ts).getTime() >= cutoff);
+                  }
+                  return next;
+                });
+                buf.streams.clear();
+              }
+            }, SSE_THROTTLE_MS);
+          };
+          scheduleFlush();
         }
       };
     };
@@ -375,6 +400,10 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       if (esRef.current) esRef.current.close();
+      if (sseFlushTimerRef.current) {
+        clearTimeout(sseFlushTimerRef.current);
+        sseFlushTimerRef.current = null;
+      }
     };
   }, [id, historyMinutes]);
 
@@ -470,11 +499,21 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
   const streamList = Object.values(event.state?.streams || {});
 
   // Configuration du graphique avec style moderne
+  const MAX_POINTS = 3000;
+  const reduceSeries = (rows) => {
+    if (!Array.isArray(rows)) return [];
+    if (rows.length <= MAX_POINTS) return rows;
+    const stride = Math.ceil(rows.length / MAX_POINTS);
+    const out = [];
+    for (let i = 0; i < rows.length; i += stride) out.push(rows[i]);
+    return out;
+  };
+  const series = reduceSeries(history);
   const data = {
-    labels: history.map(p => new Date(p.ts)),
+    labels: series.map(p => new Date(p.ts)),
     datasets: [{
       label: 'Spectateurs',
-      data: history.map(p => p.total),
+      data: series.map(p => p.total),
       borderColor: '#0c2164ff',
       backgroundColor: 'rgba(139, 92, 246, 0.1)',
       borderWidth: 3,
@@ -491,6 +530,8 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
   const options = {
     responsive: true,
     maintainAspectRatio: false,
+    parsing: false,
+    normalized: true,
     plugins: {
       legend: {
         display: false
@@ -505,7 +546,7 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
       decimation: {
         enabled: true,
         algorithm: 'lttb',
-        threshold: 1000
+        threshold: 500
       }
     },
     scales: {
@@ -513,14 +554,17 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
         type: 'time',
         time: { unit: 'minute' },
         grid: { color: 'rgba(255, 255, 255, 0.1)' },
-        ticks: { color: 'rgba(255, 255, 255, 0.7)' }
+        ticks: { color: 'rgba(255, 255, 255, 0.7)', maxTicksLimit: 10 }
       },
       y: {
         grid: { color: 'rgba(255, 255, 255, 0.1)' },
         ticks: { color: 'rgba(255, 255, 255, 0.7)' }
       }
     },
-    animation: false
+    animation: false,
+    elements: { point: { radius: 0 } },
+    interaction: { intersect: false, mode: 'index' },
+    spanGaps: true
   };
 
   // Export helpers
@@ -796,8 +840,22 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
             </div>
           </div>
 
+          {/* Toggle graphs par stream */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+            <button
+              onClick={() => setShowStreamCharts(v => !v)}
+              style={{
+                background: showStreamCharts ? 'linear-gradient(45deg, #ef4444, #f59e0b)' : 'linear-gradient(45deg, #10b981, #059669)',
+                color: 'white', border: 'none', padding: '0.5rem 1rem',
+                borderRadius: '10px', cursor: 'pointer'
+              }}
+            >
+              {showStreamCharts ? 'Masquer les graphiques par stream' : 'Afficher les graphiques par stream'}
+            </button>
+          </div>
+
           {/* Graphiques par stream + export */}
-          {Object.values(event.state?.streams || {}).length > 0 && (
+          {showStreamCharts && Object.values(event.state?.streams || {}).length > 0 && (
             <div style={{
               marginTop: '2rem',
               background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
@@ -824,7 +882,7 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
                 gap: '1rem'
               }}>
                 {Object.values(event.state.streams).map(s => {
-                  const rows = streamsHistory[s.id] || [];
+                  const rows = reduceSeries(streamsHistory[s.id] || []);
                   const sd = {
                     labels: rows.map(r => new Date(r.ts)),
                     datasets: [{
