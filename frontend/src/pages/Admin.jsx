@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { getEvents, createEvent, updateEvent } from '../api.js';
+import { getEvents, createEvent, updateEvent, deleteEvent } from '../api.js';
 import Modal from '../components/Modal.jsx';
 import customLogo from '../assets/custom-logo.svg';
 
@@ -93,7 +93,7 @@ const AnimatedBackground = () => {
 };
 
 // Composant Event Card animé
-const EventCard = ({ event, index, onEdit }) => {
+const EventCard = ({ event, index, onEdit, onDelete }) => {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
@@ -222,6 +222,32 @@ const EventCard = ({ event, index, onEdit }) => {
           >
             ✏️ Modifier
           </button>
+
+          <button
+            onClick={() => onDelete(event)}
+            style={{
+              background: 'linear-gradient(45deg, #ef4444, #b91c1c)',
+              color: 'white',
+              border: 'none',
+              padding: '0.75rem 1.25rem',
+              borderRadius: '12px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              transform: isHovered ? 'scale(1.05)' : 'scale(1)',
+              transition: 'all 0.3s ease',
+              boxShadow: '0 4px 15px rgba(239, 68, 68, 0.5)'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'scale(1.1)';
+              e.target.style.boxShadow = '0 6px 20px rgba(239, 68, 68, 0.7)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = isHovered ? 'scale(1.05)' : 'scale(1)';
+              e.target.style.boxShadow = '0 4px 15px rgba(239, 68, 68, 0.5)';
+            }}
+          >
+            🗑️ Supprimer
+          </button>
         </div>
       </div>
     </div>
@@ -244,6 +270,12 @@ export default function Admin() {
   const [confirmHighInterval, setConfirmHighInterval] = useState(false);
   const [confirmCountdown, setConfirmCountdown] = useState(0);
   const countdownRef = useRef(null);
+
+  // Suppression
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
     getEvents()
@@ -574,6 +606,10 @@ export default function Admin() {
                     setConfirmHighInterval(false);
                     setConfirmCountdown(0);
                     setEditOpen(true);
+                  }} onDelete={(ev) => {
+                    setDeleteTarget(ev);
+                    setDeleteError('');
+                    setDeleteOpen(true);
                   }} />
                 ))}
               </div>
@@ -652,7 +688,44 @@ export default function Admin() {
               padding: '0.75rem 1rem',
               color: 'white'
             }}
-          />
+      />
+
+      {/* Modal de confirmation de suppression */}
+      <Modal
+        isOpen={deleteOpen}
+        title={deleteTarget ? `🗑️ Supprimer "${deleteTarget.name}" ?` : '🗑️ Supprimer cet évènement ?'}
+        onClose={() => {
+          setDeleteOpen(false);
+          setDeleteTarget(null);
+        }}
+        confirmLabel={deleteSubmitting ? 'Suppression…' : 'Confirmer'}
+        cancelLabel={deleteSubmitting ? 'Annuler' : 'Annuler'}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeleteSubmitting(true);
+          setDeleteError('');
+          try {
+            await deleteEvent(deleteTarget.id);
+            setEvents((prev) => prev.filter((e) => e.id !== deleteTarget.id));
+            setDeleteOpen(false);
+            setDeleteTarget(null);
+          } catch (e) {
+            console.error('Suppression échouée:', e);
+            setDeleteError(e.message || 'Erreur lors de la suppression');
+          } finally {
+            setDeleteSubmitting(false);
+          }
+        }}
+      >
+        <div style={{ color: 'rgba(255,255,255,0.85)' }}>
+          Cette action supprime l’évènement de la liste et met fin aux mises à jour en temps réel. Les données historiques restent conservées.
+          {deleteError && (
+            <div style={{ marginTop: '0.75rem', color: '#ef4444', fontWeight: 600 }}>
+              {deleteError}
+            </div>
+          )}
+        </div>
+      </Modal>
           <label htmlFor="edit-interval" style={{ position: 'absolute', left: '-10000px' }}>Intervalle de polling (secondes)</label>
           <input
             type="number"

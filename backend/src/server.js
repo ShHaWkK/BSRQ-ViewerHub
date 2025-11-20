@@ -5,7 +5,11 @@ Author : ShHawk
 
 import express from 'express';
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
+// Correction compat ESM/CJS sous Node v22 pour express-rate-limit
+// On force l'utilisation de la résolution CJS via createRequire.
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const rateLimit = require('express-rate-limit');
 import compression from 'compression';
 import fs from 'fs';
 import os from 'os';
@@ -86,7 +90,7 @@ function parseRange(req, defaultMinutes) {
 async function init() {
   await migrate();
   // Charger les évènements existants
-  const { rows: evs } = await pool.query('SELECT * FROM events');
+  const { rows: evs } = await pool.query('SELECT * FROM events WHERE COALESCE(is_deleted,false)=false');
   for (const ev of evs) {
     ev.streams = (await pool.query('SELECT * FROM streams WHERE event_id=$1', [ev.id])).rows;
     // Initialiser les propriétés par défaut si elles n'existent pas
@@ -260,8 +264,9 @@ app.post('/events', async (req, res) => {
   const { name, pollIntervalSec } = req.body;
   const poll = Math.max(2, parseInt(pollIntervalSec || process.env.POLL_INTERVAL_DEFAULT)) * 1000;
   const id = genId();
-  await pool.query('INSERT INTO events(id,name,poll_interval_ms) VALUES($1,$2,$3)', [id, name, poll]);
-  const ev = { id, name, poll_interval_ms: poll, streams: [], state: { total: 0, streams: {} } };
+  const { rows } = await pool.query('INSERT INTO events(id,name,poll_interval_ms) VALUES($1,$2,$3) RETURNING *', [id, name, poll]);
+  const evRow = rows[0] || { id, name, poll_interval_ms: poll };
+  const ev = { id: evRow.id, name: evRow.name, poll_interval_ms: evRow.poll_interval_ms, created_at: evRow.created_at, streams: [], state: { total: 0, streams: {} } };
   events.set(id, ev);
   startPolling(id);
   res.json({ id: ev.id, name: ev.name, pollIntervalSec: ev.poll_interval_ms / 1000, streams: ev.streams, state: ev.state });
@@ -329,8 +334,42 @@ app.delete('/events/:id/streams/:sid', async (req, res) => {
     const ev = getEvent(req.params.id);
     await pool.query('DELETE FROM streams WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);
     ev.streams = ev.streams.filter(s => s.id !== req.params.sid);
+    // Répercuter immédiatement dans l'état courant et notifier les clients SSE
+    if (ev.state && ev.state.streams) {
+      delete ev.state.streams[req.params.sid];
+      const total = Object.values(ev.state.streams).reduce((acc, s) => acc + (s.current || 0), 0);
+      ev.state.total = total;
+      const now = new Date();
+      const payload = JSON.stringify({ type: 'tick', data: { ts: now, total, streams: Object.values(ev.state.streams) } });
+      const set = clients.get(ev.id) || new Set();
+      for (const client of set) client.write(`data: ${payload}\n\n`);
+    }
     res.json({ ok: true });
   } catch {
+    res.status(404).end();
+  }
+});
+
+// Suppression logique d'un évènement (soft delete)
+app.delete('/events/:id', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    // Marquer comme supprimé dans la base
+    await pool.query('UPDATE events SET is_deleted=true, deleted_at=NOW() WHERE id=$1', [ev.id]);
+    // Arrêter le polling
+    if (ev.timer) { clearInterval(ev.timer); ev.timer = null; }
+    // Fermer les clients SSE attachés
+    const set = clients.get(ev.id);
+    if (set) {
+      for (const client of set) {
+        try { client.end(); } catch {}
+      }
+      clients.delete(ev.id);
+    }
+    // Retirer de l'état en mémoire
+    events.delete(ev.id);
+    res.status(204).end();
+  } catch (e) {
     res.status(404).end();
   }
 });

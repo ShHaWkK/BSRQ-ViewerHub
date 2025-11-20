@@ -40,6 +40,14 @@ export async function getEvent(id) {
   return readJsonOrThrow(res);
 }
 
+export async function deleteEvent(id) {
+  const res = await fetch(`${API}/events/${id}`, { method: 'DELETE' });
+  if (!res.ok && res.status !== 204) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`DELETE /events/${id} -> HTTP ${res.status}: ${text.slice(0, 200)}`);
+  }
+}
+
 export async function addStream(id, data) {
   const res = await fetch(`${API}/events/${id}/streams`, {
     method: 'POST',
