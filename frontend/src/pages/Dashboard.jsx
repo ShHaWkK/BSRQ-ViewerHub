@@ -407,7 +407,7 @@ export default function Dashboard() {
         sseFlushTimerRef.current = null;
       }
     };
-  }, [id, historyMinutes]);
+  }, [id, historyMinutes, event?.created_at]);
 
   // Charger l'historique JSON (incluant les streams) pour la fenêtre sélectionnée
   useEffect(() => {
@@ -511,11 +511,22 @@ export default function Dashboard() {
     return out;
   };
   const series = reduceSeries(history);
+  // Utiliser des points {x, y} pour une échelle temporelle fiable avec parsing désactivé
+  const seriesPoints = series.map(p => ({ x: new Date(p.ts), y: (typeof p.total === 'number' ? p.total : Number(p.total) || 0) }));
+  // Déterminer unité de temps et bornes selon la fenêtre choisie
+  const now = new Date();
+  const xMin = (historyMinutes === 'all' && event?.created_at)
+    ? new Date(event.created_at)
+    : new Date(Date.now() - Number(historyMinutes) * 60 * 1000);
+  const xMax = now;
+  const totalMinutes = (historyMinutes === 'all' && event?.created_at)
+    ? Math.max(1, Math.round((xMax.getTime() - xMin.getTime()) / 60000))
+    : Number(historyMinutes);
+  const timeUnit = totalMinutes >= 1440 ? 'day' : (totalMinutes >= 360 ? 'hour' : 'minute');
   const data = {
-    labels: series.map(p => new Date(p.ts)),
     datasets: [{
       label: 'Spectateurs',
-      data: series.map(p => p.total),
+      data: seriesPoints,
       borderColor: '#0c2164ff',
       backgroundColor: 'rgba(139, 92, 246, 0.1)',
       borderWidth: 3,
@@ -529,11 +540,13 @@ export default function Dashboard() {
     }]
   };
 
+  const maxTotal = Math.max(10, ...seriesPoints.map(p => (typeof p.y === 'number' ? p.y : Number(p.y) || 0)));
   const options = {
     responsive: true,
     maintainAspectRatio: false,
     parsing: false,
-    normalized: true,
+    // Ne pas normaliser: on veut afficher les valeurs réelles (pas 0..1)
+    normalized: false,
     plugins: {
       legend: {
         display: false
@@ -554,11 +567,15 @@ export default function Dashboard() {
     scales: {
       x: {
         type: 'time',
-        time: { unit: 'minute' },
+        time: { unit: timeUnit },
+        min: xMin,
+        max: xMax,
         grid: { color: 'rgba(255, 255, 255, 0.1)' },
         ticks: { color: 'rgba(255, 255, 255, 0.7)', maxTicksLimit: 10 }
       },
       y: {
+        beginAtZero: true,
+        suggestedMax: Math.ceil(maxTotal * 1.1),
         grid: { color: 'rgba(255, 255, 255, 0.1)' },
         ticks: { color: 'rgba(255, 255, 255, 0.7)' }
       }
@@ -885,11 +902,11 @@ export default function Dashboard() {
               }}>
                 {Object.values(event.state.streams).map(s => {
                   const rows = reduceSeries(streamsHistory[s.id] || []);
+                  const points = rows.map(r => ({ x: new Date(r.ts), y: (typeof r.current === 'number' ? r.current : Number(r.current) || 0) }));
                   const sd = {
-                    labels: rows.map(r => new Date(r.ts)),
                     datasets: [{
                       label: s.label,
-                      data: rows.map(r => r.current || 0),
+                      data: points,
                       borderColor: s.online ? '#10b981' : '#ef4444',
                       backgroundColor: 'rgba(139, 92, 246, 0.1)',
                       borderWidth: 2,

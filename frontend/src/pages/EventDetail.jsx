@@ -152,7 +152,18 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
     setSaveError(null);
     setIsSaving(true);
     try {
-      await onUpdate(stream.id, editForm);
+      const nextLabel = (editForm.label || '').trim();
+      if (!nextLabel) {
+        throw new Error('Le label est requis');
+      }
+      const rawInterval = editForm.customInterval;
+      const intervalNum = rawInterval === '' || rawInterval === null || rawInterval === undefined
+        ? undefined
+        : parseInt(rawInterval, 10);
+      const payload = intervalNum && !isNaN(intervalNum)
+        ? { label: nextLabel, customInterval: intervalNum }
+        : { label: nextLabel };
+      await onUpdate(stream.id, payload);
       setIsEditing(false);
     } catch (error) {
       console.error('Erreur lors de la mise à jour:', error);

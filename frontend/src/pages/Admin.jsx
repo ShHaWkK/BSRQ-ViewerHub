@@ -698,8 +698,8 @@ export default function Admin() {
           setDeleteOpen(false);
           setDeleteTarget(null);
         }}
-        confirmLabel={deleteSubmitting ? 'Suppression…' : 'Confirmer'}
-        cancelLabel={deleteSubmitting ? 'Annuler' : 'Annuler'}
+        confirmText={deleteSubmitting ? 'Suppression…' : 'Confirmer'}
+        isSubmitting={deleteSubmitting}
         onConfirm={async () => {
           if (!deleteTarget) return;
           setDeleteSubmitting(true);
