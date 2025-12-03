@@ -247,8 +247,14 @@ export default function LiveViewer() {
       if (esRef.current) { esRef.current.close(); esRef.current = null; }
       const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
       const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-      const base = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
-      esRef.current = new EventSource(`${base}/events/${id}/stream`);
+      let base = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
+      if (typeof base === 'string' && base.startsWith('/') && typeof window !== 'undefined') {
+        const port = window.location.port;
+        if (port === '3019') {
+          base = `${proto}//${host}:4000`;
+        }
+      }
+      esRef.current = new EventSource(`${base.replace(/\/+$/, '')}/events/${id}/stream`);
       esRef.current.onmessage = ev => {
         const raw = ev.data;
         if (!raw || raw[0] !== '{') return;

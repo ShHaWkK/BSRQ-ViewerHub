@@ -280,10 +280,18 @@ export default function Dashboard() {
   const { id } = useParams();
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-  const API_BASE = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
+  let API_BASE = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
+  // Si la base est relative (ex: '/api') et qu'on accède directement au serveur frontend (3019),
+  // utiliser le backend direct sur :4000 pour éviter que le frontend renvoie du HTML.
+  if (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined') {
+    const port = window.location.port;
+    if (port === '3019') {
+      API_BASE = `${proto}//${host}:4000`;
+    }
+  }
   const [event, setEvent] = useState(null);
   const [history, setHistory] = useState([]);
-  const [historyMinutes, setHistoryMinutes] = useState(60); // number or 'all' (par défaut 60 pour alléger)
+  const [historyMinutes, setHistoryMinutes] = useState('all'); // forcé à 'all' pour couvrir toute la durée
   const [totalViewers, setTotalViewers] = useState(0);
   const [previousTotal, setPreviousTotal] = useState(0);
   const [streamsHistory, setStreamsHistory] = useState({});
@@ -310,10 +318,9 @@ export default function Dashboard() {
         esRef.current.close();
         esRef.current = null;
       }
-      const params = (historyMinutes === 'all' && event?.created_at)
-        ? `from=${encodeURIComponent(event.created_at)}&to=${encodeURIComponent(new Date().toISOString())}`
-        : (historyMinutes === 'all' ? `minutes=180` : `minutes=${historyMinutes}`);
-      esRef.current = new EventSource(`${API_BASE}/events/${id}/stream?${params}`);
+      // Afficher par défaut les dernières 24h pour voir les variations quotidiennes
+      const params = `minutes=1440`;
+      esRef.current = new EventSource(`${API_BASE.replace(/\/+$/, '')}/events/${id}/stream?${params}`);
       esRef.current.onmessage = ev => {
         const raw = ev.data;
         if (!raw || raw[0] !== '{') return;
@@ -347,18 +354,20 @@ export default function Dashboard() {
             sseFlushTimerRef.current = setTimeout(() => {
               sseFlushTimerRef.current = null;
               const buf = sseBufferRef.current;
-              // Mettre à jour état courant (cartes)
+              // Mettre à jour état courant (cartes) et total affiché
               if (buf.lastState) {
                 setEvent(e => ({ ...e, state: buf.lastState }));
-                setTotalViewers(buf.lastState.total || 0);
+                const sum = Object.values(buf.lastState.streams || {}).reduce((acc, s) => {
+                  const v = (typeof s.current === 'number' ? s.current : Number(s.current) || 0);
+                  return acc + v;
+                }, 0);
+                setTotalViewers(sum);
               }
               // Historique total
               if (buf.totals.length) {
                 setHistory(h => {
                   const next = h.concat(buf.totals);
-                  const cutoff = (historyMinutes === 'all' && event?.created_at)
-                    ? new Date(event.created_at).getTime()
-                    : Date.now() - Number(historyMinutes) * 60 * 1000;
+                  const cutoff = event?.created_at ? new Date(event.created_at).getTime() : 0;
                   return next.filter(row => new Date(row.ts).getTime() >= cutoff);
                 });
                 buf.totals = [];
@@ -366,9 +375,7 @@ export default function Dashboard() {
               // Historique par stream
               if (buf.streams.size) {
                 setStreamsHistory(prev => {
-                  const cutoff = (historyMinutes === 'all' && event?.created_at)
-                    ? new Date(event.created_at).getTime()
-                    : Date.now() - Number(historyMinutes) * 60 * 1000;
+                  const cutoff = event?.created_at ? new Date(event.created_at).getTime() : 0;
                   const next = { ...prev };
                   for (const [sid, arrNew] of buf.streams.entries()) {
                     const arr = next[sid] || [];
@@ -407,70 +414,36 @@ export default function Dashboard() {
         sseFlushTimerRef.current = null;
       }
     };
-  }, [id, historyMinutes, event?.created_at]);
+  }, [id, event?.created_at]);
 
-  // Charger l'historique JSON (incluant les streams) pour la fenêtre sélectionnée
+  // Charger l'historique JSON (incluant les streams) sur les dernières 24h
   useEffect(() => {
     let aborted = false;
     (async () => {
       try {
-        // Chargement initial JSON: minutes ou depuis le début avec boucle afterTs
-        if (historyMinutes === 'all' && event?.created_at) {
-          let allHistory = [];
-          let allStreams = [];
-          let lastTs = null;
-          // Première requête avec from/to pour amorcer
-          let url = `${API_BASE}/events/${id}/history?streams=1&limit=5000&from=${encodeURIComponent(event.created_at)}&to=${encodeURIComponent(new Date().toISOString())}`;
-          while (!aborted) {
-            const res = await fetch(url);
-            if (!res.ok) break;
-            const ct = res.headers.get('content-type') || '';
-            if (!ct.includes('application/json')) break;
-            const data = await res.json();
-            if (aborted) return;
-            const h = Array.isArray(data.history) ? data.history : [];
-            const s = Array.isArray(data.streams) ? data.streams : [];
-            allHistory = allHistory.concat(h);
-            allStreams = allStreams.concat(s);
-            if (h.length < 5000 && s.length < 5000) break;
-            lastTs = (h.length ? h[h.length - 1].ts : (s.length ? s[s.length - 1].ts : lastTs));
-            if (!lastTs) break;
-            url = `${API_BASE}/events/${id}/history?streams=1&limit=5000&afterTs=${encodeURIComponent(lastTs)}`;
-          }
-          // Appliquer les données agrégées
-          setHistory(allHistory);
+        const url = `${API_BASE}/events/${id}/history?minutes=1440&streams=1&limit=5000`;
+        const res = await fetch(url);
+        if (!res.ok) return; // SSE init fera le fallback
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) return;
+        const data = await res.json();
+        if (aborted) return;
+        if (Array.isArray(data.history)) setHistory(data.history);
+        if (Array.isArray(data.streams)) {
           const grouped = {};
-          for (const row of allStreams) {
+          for (const row of data.streams) {
             const arr = grouped[row.stream_id] || [];
             arr.push({ ts: row.ts, current: row.concurrent_viewers });
             grouped[row.stream_id] = arr;
           }
           setStreamsHistory(grouped);
-        } else {
-          const url = `${API_BASE}/events/${id}/history?minutes=${historyMinutes}&streams=1&limit=5000`;
-          const res = await fetch(url);
-          if (!res.ok) return; // SSE init fera le fallback
-          const ct = res.headers.get('content-type') || '';
-          if (!ct.includes('application/json')) return;
-          const data = await res.json();
-          if (aborted) return;
-          if (Array.isArray(data.history)) setHistory(data.history);
-          if (Array.isArray(data.streams)) {
-            const grouped = {};
-            for (const row of data.streams) {
-              const arr = grouped[row.stream_id] || [];
-              arr.push({ ts: row.ts, current: row.concurrent_viewers });
-              grouped[row.stream_id] = arr;
-            }
-            setStreamsHistory(grouped);
-          }
         }
       } catch (e) {
         // silencieux: on garde l'affichage existant
       }
     })();
     return () => { aborted = true; };
-  }, [id, historyMinutes, event?.created_at]);
+  }, [id, event?.created_at]);
 
   if (!event) {
     return (
@@ -498,7 +471,7 @@ export default function Dashboard() {
     );
   }
 
-  const streamList = Object.values(event.state?.streams || {});
+  const streamList = event.streams || [];
 
   // Configuration du graphique avec style moderne
   const MAX_POINTS = 3000;
@@ -515,18 +488,39 @@ export default function Dashboard() {
   const seriesPoints = series.map(p => ({ x: new Date(p.ts), y: (typeof p.total === 'number' ? p.total : Number(p.total) || 0) }));
   // Déterminer unité de temps et bornes selon la fenêtre choisie
   const now = new Date();
-  const xMin = (historyMinutes === 'all' && event?.created_at)
-    ? new Date(event.created_at)
-    : new Date(Date.now() - Number(historyMinutes) * 60 * 1000);
+  const computeEarliestTs = () => {
+    let t = Infinity;
+    if (Array.isArray(history) && history.length) {
+      for (const row of history) {
+        const ts = new Date(row.ts).getTime();
+        if (ts < t) t = ts;
+      }
+    }
+    for (const sid in streamsHistory) {
+      const arr = streamsHistory[sid];
+      if (Array.isArray(arr)) {
+        for (const row of arr) {
+          const ts = new Date(row.ts).getTime();
+          if (ts < t) t = ts;
+        }
+      }
+    }
+    if (!isFinite(t)) {
+      if (event?.created_at) return new Date(event.created_at);
+      return new Date(Date.now() - 3 * 60 * 60 * 1000);
+    }
+    return new Date(t);
+  };
+  const xMin = computeEarliestTs();
   const xMax = now;
-  const totalMinutes = (historyMinutes === 'all' && event?.created_at)
-    ? Math.max(1, Math.round((xMax.getTime() - xMin.getTime()) / 60000))
-    : Number(historyMinutes);
+  const totalMinutes = Math.max(1, Math.round((xMax.getTime() - xMin.getTime()) / 60000));
   const timeUnit = totalMinutes >= 1440 ? 'day' : (totalMinutes >= 360 ? 'hour' : 'minute');
+  // Ne garder que les points dans la fenêtre visible pour éviter des axes trompeurs
+  const seriesVisiblePoints = seriesPoints.filter(p => p.x >= xMin && p.x <= xMax);
   const data = {
     datasets: [{
       label: 'Spectateurs',
-      data: seriesPoints,
+      data: seriesVisiblePoints,
       borderColor: '#0c2164ff',
       backgroundColor: 'rgba(139, 92, 246, 0.1)',
       borderWidth: 3,
@@ -539,8 +533,8 @@ export default function Dashboard() {
       pointHoverRadius: 0
     }]
   };
-
-  const maxTotal = Math.max(10, ...seriesPoints.map(p => (typeof p.y === 'number' ? p.y : Number(p.y) || 0)));
+  
+  const maxTotal = Math.max(10, ...seriesVisiblePoints.map(p => (typeof p.y === 'number' ? p.y : Number(p.y) || 0)));
   const options = {
     responsive: true,
     maintainAspectRatio: false,
@@ -726,14 +720,17 @@ export default function Dashboard() {
             gap: '1rem',
             marginBottom: '2rem'
           }}>
-            {streamList.map(s => (
-              <DynamicStreamCard 
-                key={s.id} 
-                label={s.label} 
-                current={s.current} 
-                online={s.online} 
-              />
-            ))}
+            {streamList.map(s => {
+              const st = event.state?.streams?.[s.id];
+              return (
+                <DynamicStreamCard 
+                  key={s.id} 
+                  label={s.label} 
+                  current={st?.current ?? 0} 
+                  online={st?.online ?? false} 
+                />
+              );
+            })}
           </div>
 
           {/* Graphique total + export */}
@@ -756,31 +753,20 @@ export default function Dashboard() {
             }}>
               📈 Évolution Temps Réel
             </h3>
-            <div style={{ height: '300px' }}>
+            <div style={{ height: '300px', position: 'relative' }}>
               <Line ref={totalChartRef} data={data} options={options} />
+              {seriesVisiblePoints.length === 0 && (
+                <div style={{
+                  position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: 'rgba(255,255,255,0.9)', fontWeight: 600,
+                  background: 'linear-gradient(135deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.05) 100%)',
+                  borderRadius: '16px'
+                }}>
+                  Aucune donnée disponible sur la période.
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <label style={{ color: 'white', opacity: 0.9 }}>
-                Fenêtre:
-                <select
-                  value={historyMinutes}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setHistoryMinutes(v === 'all' ? 'all' : parseInt(v, 10));
-                  }}
-                  style={{ marginLeft: '0.5rem', padding: '0.25rem 0.5rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.3)', background: 'rgba(0,0,0,0.2)', color: 'white' }}
-                >
-                  <option value="all">Depuis le début</option>
-                  <option value={60}>1h</option>
-                  <option value={180}>3h</option>
-                  <option value={360}>6h</option>
-                  <option value={720}>12h</option>
-                  <option value={1440}>24h</option>
-                  <option value={2880}>48h</option>
-                  <option value={4320}>72h</option>
-                  <option value={10080}>7j</option>
-                </select>
-              </label>
               <button
                 onClick={() => {
                   const chart = totalChartRef.current;
@@ -797,14 +783,14 @@ export default function Dashboard() {
               <button
                 onClick={() => {
                   const nowIso = new Date().toISOString();
-                  const url = (historyMinutes === 'all' && event?.created_at)
+                  const url = (event?.created_at)
                     ? `${API_BASE}/events/${id}/history.csv?from=${encodeURIComponent(event.created_at)}&to=${encodeURIComponent(nowIso)}`
-                    : `${API_BASE}/events/${id}/history.csv?minutes=${historyMinutes}`;
+                    : `${API_BASE}/events/${id}/history.csv?minutes=180`;
                   const a = document.createElement('a');
                   a.href = url;
-                  a.download = (historyMinutes === 'all')
+                  a.download = (event?.created_at)
                     ? `event_${id}_history_all.csv`
-                    : `event_${id}_history_${historyMinutes}m.csv`;
+                    : `event_${id}_history_180m.csv`;
                   document.body.appendChild(a);
                   a.click();
                   document.body.removeChild(a);
@@ -821,9 +807,9 @@ export default function Dashboard() {
                 onClick={async () => {
                   try {
                     setJobExporting(true); setJobProgress(0); setJobId(null);
-                    const payload = (historyMinutes === 'all' && event?.created_at)
+                    const payload = (event?.created_at)
                       ? { type: 'total', from: event.created_at, to: new Date().toISOString() }
-                      : { type: 'total', minutes: historyMinutes };
+                      : { type: 'total', minutes: 180 };
                     const res = await fetch(`${API_BASE}/events/${id}/export`, {
                       method: 'POST', headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify(payload)
@@ -837,7 +823,7 @@ export default function Dashboard() {
                       if (sdata.status === 'done') {
                         setJobExporting(false);
                         const url = `${API_BASE}/exports/${data.jobId}/download`;
-                        const a = document.createElement('a'); a.href = url; a.download = (historyMinutes === 'all' ? `event_${id}_history_all.csv` : `event_${id}_history_${historyMinutes}m.csv`); document.body.appendChild(a); a.click(); document.body.removeChild(a); return;
+                        const a = document.createElement('a'); a.href = url; a.download = (event?.created_at ? `event_${id}_history_all.csv` : `event_${id}_history_180m.csv`); document.body.appendChild(a); a.click(); document.body.removeChild(a); return;
                       }
                       if (sdata.status === 'error') { setJobExporting(false); return; }
                       setJobProgress(sdata.progress || 0);
@@ -854,7 +840,7 @@ export default function Dashboard() {
                   borderRadius: '10px', cursor: 'pointer'
                 }}
               >
-                {jobExporting ? `Job… ${jobProgress}` : 'Export asynchrone'}
+                {jobExporting ? `Job… ${jobProgress}` : 'Exporter CSV (async)'}
               </button>
             </div>
           </div>
@@ -874,7 +860,7 @@ export default function Dashboard() {
           </div>
 
           {/* Graphiques par stream + export */}
-          {showStreamCharts && Object.values(event.state?.streams || {}).length > 0 && (
+          {showStreamCharts && (event.streams || []).length > 0 && (
             <div style={{
               marginTop: '2rem',
               background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
@@ -900,14 +886,15 @@ export default function Dashboard() {
                 gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
                 gap: '1rem'
               }}>
-                {Object.values(event.state.streams).map(s => {
-                  const rows = reduceSeries(streamsHistory[s.id] || []);
+                {(event.streams || []).map(stream => {
+                  const rows = reduceSeries(streamsHistory[stream.id] || []);
                   const points = rows.map(r => ({ x: new Date(r.ts), y: (typeof r.current === 'number' ? r.current : Number(r.current) || 0) }));
+                  const st = event.state?.streams?.[stream.id];
                   const sd = {
                     datasets: [{
-                      label: s.label,
+                      label: stream.label,
                       data: points,
-                      borderColor: s.online ? '#10b981' : '#ef4444',
+                      borderColor: st?.online ? '#10b981' : '#ef4444',
                       backgroundColor: 'rgba(139, 92, 246, 0.1)',
                       borderWidth: 2,
                       tension: 0.3,
@@ -915,21 +902,21 @@ export default function Dashboard() {
                     }]
                   };
                   return (
-                    <div key={s.id} style={{
+                    <div key={stream.id} style={{
                       background: 'rgba(255,255,255,0.05)',
                       border: '1px solid rgba(255,255,255,0.2)',
                       borderRadius: '12px',
                       padding: '1rem'
                     }}>
-                      <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: 'white' }}>🎬 {s.label}</div>
+                      <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: 'white' }}>🎬 {stream.label}</div>
                       <div style={{ height: '200px' }}>
-                        <Line ref={el => (streamChartRefs.current[s.id] = el)} data={sd} options={{ ...options, maintainAspectRatio: false }} />
+                        <Line ref={el => (streamChartRefs.current[stream.id] = el)} data={sd} options={{ ...options, maintainAspectRatio: false }} />
                       </div>
                       <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                         <button
                           onClick={() => {
-                            const chart = streamChartRefs.current[s.id];
-                            if (chart) downloadDataUrl(`${s.label.replace(/\s+/g,'_')}_viewers_${id}.png`, chart.toBase64Image());
+                            const chart = streamChartRefs.current[stream.id];
+                            if (chart) downloadDataUrl(`${stream.label.replace(/\s+/g,'_')}_viewers_${id}.png`, chart.toBase64Image());
                           }}
                           style={{
                             background: 'linear-gradient(45deg, #10b981, #059669)',
@@ -942,14 +929,14 @@ export default function Dashboard() {
                         <button
                           onClick={() => {
                             const nowIso = new Date().toISOString();
-                            const url = (historyMinutes === 'all' && event?.created_at)
-                              ? `${API_BASE}/events/${id}/streams/${s.id}/history.csv?from=${encodeURIComponent(event.created_at)}&to=${encodeURIComponent(nowIso)}`
-                              : `${API_BASE}/events/${id}/streams/${s.id}/history.csv?minutes=${historyMinutes}`;
+                            const url = (event?.created_at)
+                              ? `${API_BASE}/events/${id}/streams/${stream.id}/history.csv?from=${encodeURIComponent(event.created_at)}&to=${encodeURIComponent(nowIso)}`
+                              : `${API_BASE}/events/${id}/streams/${stream.id}/history.csv?minutes=180`;
                             const a = document.createElement('a');
                             a.href = url;
-                            a.download = (historyMinutes === 'all')
-                              ? `${s.label.replace(/\s+/g,'_')}_viewers_${id}_all.csv`
-                              : `${s.label.replace(/\s+/g,'_')}_viewers_${id}_${historyMinutes}m.csv`;
+                            a.download = (event?.created_at)
+                              ? `${stream.label.replace(/\s+/g,'_')}_viewers_${id}_all.csv`
+                              : `${stream.label.replace(/\s+/g,'_')}_viewers_${id}_180m.csv`;
                             document.body.appendChild(a);
                             a.click();
                             document.body.removeChild(a);
@@ -965,9 +952,9 @@ export default function Dashboard() {
                         <button
                           onClick={async () => {
                             try {
-                              const payload = (historyMinutes === 'all' && event?.created_at)
-                                ? { type: 'stream', sid: s.id, from: event.created_at, to: new Date().toISOString() }
-                                : { type: 'stream', sid: s.id, minutes: historyMinutes };
+                              const payload = (event?.created_at)
+                                ? { type: 'stream', sid: stream.id, from: event.created_at, to: new Date().toISOString() }
+                                : { type: 'stream', sid: stream.id, minutes: 180 };
                               const res = await fetch(`${API_BASE}/events/${id}/export`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify(payload)
@@ -979,7 +966,7 @@ export default function Dashboard() {
                                 const sdata = await sres.json();
                                 if (sdata.status === 'done') {
                                   const url = `${API_BASE}/exports/${data.jobId}/download`;
-                                  const a = document.createElement('a'); a.href = url; a.download = (historyMinutes === 'all' ? `${s.label.replace(/\s+/g,'_')}_viewers_${id}_all.csv` : `${s.label.replace(/\s+/g,'_')}_viewers_${id}_${historyMinutes}m.csv`); document.body.appendChild(a); a.click(); document.body.removeChild(a); return;
+                                  const a = document.createElement('a'); a.href = url; a.download = (event?.created_at ? `${stream.label.replace(/\s+/g,'_')}_viewers_${id}_all.csv` : `${stream.label.replace(/\s+/g,'_')}_viewers_${id}_180m.csv`); document.body.appendChild(a); a.click(); document.body.removeChild(a); return;
                                 }
                                 if (sdata.status === 'error') { return; }
                                 setTimeout(poll, 1000);

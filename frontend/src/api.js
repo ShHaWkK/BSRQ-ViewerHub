@@ -3,6 +3,34 @@ const PROTO = typeof window !== 'undefined' ? window.location.protocol : 'http:'
 const DEFAULT_API = `${PROTO}//${HOST}:4000`;
 const API = import.meta.env.VITE_API_URL || DEFAULT_API;
 
+function joinUrl(base, path) {
+  const b = (base || '').replace(/\/+$/, '');
+  const p = (path || '').replace(/^\/+/, '');
+  return `${b}/${p}`;
+}
+
+const API_IS_RELATIVE = typeof API === 'string' && API.startsWith('/');
+
+async function fetchWithFallback(path, options) {
+  // Première tentative: base explicitement configurée (peut être relative '/api')
+  const primaryUrl = joinUrl(API, path);
+  let res = await fetch(primaryUrl, options);
+  const ct = res.headers.get('content-type') || '';
+  // Si on obtient du HTML avec une base relative, on retente vers l'API directe (port 4000)
+  const looksHtml = ct.includes('text/html');
+  if (API_IS_RELATIVE && looksHtml) {
+    const fallbackUrl = joinUrl(DEFAULT_API, path);
+    try {
+      const res2 = await fetch(fallbackUrl, options);
+      return res2;
+    } catch {
+      // en cas d'échec, retourner la réponse initiale pour que l'erreur soit explicite
+      return res;
+    }
+  }
+  return res;
+}
+
 async function readJsonOrThrow(res) {
   const ct = res.headers.get('content-type') || '';
   if (!res.ok) {
@@ -22,12 +50,12 @@ async function readJsonOrThrow(res) {
 }
 
 export async function getEvents() {
-  const res = await fetch(`${API}/events`);
+  const res = await fetchWithFallback('/events');
   return readJsonOrThrow(res);
 }
 
 export async function createEvent(data) {
-  const res = await fetch(`${API}/events`, {
+  const res = await fetchWithFallback('/events', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
@@ -36,12 +64,12 @@ export async function createEvent(data) {
 }
 
 export async function getEvent(id) {
-  const res = await fetch(`${API}/events/${id}`);
+  const res = await fetchWithFallback(`/events/${id}`);
   return readJsonOrThrow(res);
 }
 
 export async function deleteEvent(id) {
-  const res = await fetch(`${API}/events/${id}`, { method: 'DELETE' });
+  const res = await fetchWithFallback(`/events/${id}`, { method: 'DELETE' });
   if (!res.ok && res.status !== 204) {
     const text = await res.text().catch(() => '');
     throw new Error(`DELETE /events/${id} -> HTTP ${res.status}: ${text.slice(0, 200)}`);
@@ -49,7 +77,7 @@ export async function deleteEvent(id) {
 }
 
 export async function addStream(id, data) {
-  const res = await fetch(`${API}/events/${id}/streams`, {
+  const res = await fetchWithFallback(`/events/${id}/streams`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
@@ -58,12 +86,23 @@ export async function addStream(id, data) {
 }
 
 export async function removeStream(eventId, streamId) {
-  await fetch(`${API}/events/${eventId}/streams/${streamId}`, { method: 'DELETE' });
+  const res = await fetchWithFallback(`/events/${eventId}/streams/${streamId}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`DELETE /events/${eventId}/streams/${streamId} -> HTTP ${res.status}: ${text.slice(0, 200)}`);
+  }
+  // Le backend renvoie { ok: true } sur succès
+  try {
+    return await res.json();
+  } catch {
+    // Si pas de JSON, considérer comme succès (certains serveurs peuvent répondre 204)
+    return { ok: true };
+  }
 }
 
 // Fonctions pour contrôler la pause/start
 export async function pauseEvent(eventId) {
-  const res = await fetch(`${API}/events/${eventId}/pause`, {
+  const res = await fetchWithFallback(`/events/${eventId}/pause`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }
   });
@@ -71,7 +110,7 @@ export async function pauseEvent(eventId) {
 }
 
 export async function startEvent(eventId) {
-  const res = await fetch(`${API}/events/${eventId}/start`, {
+  const res = await fetchWithFallback(`/events/${eventId}/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }
   });
@@ -80,7 +119,7 @@ export async function startEvent(eventId) {
 
 // Mettre à jour les détails d'un évènement (nom, intervalle)
 export async function updateEvent(eventId, { name, pollIntervalSec }) {
-  const res = await fetch(`${API}/events/${eventId}`, {
+  const res = await fetchWithFallback(`/events/${eventId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, pollIntervalSec })
@@ -90,7 +129,7 @@ export async function updateEvent(eventId, { name, pollIntervalSec }) {
 
 // Fonctions pour gérer les favoris
 export async function toggleStreamFavorite(eventId, streamId, isFavorite) {
-  const res = await fetch(`${API}/events/${eventId}/streams/${streamId}/favorite`, {
+  const res = await fetchWithFallback(`/events/${eventId}/streams/${streamId}/favorite`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ is_favorite: isFavorite })
@@ -100,7 +139,7 @@ export async function toggleStreamFavorite(eventId, streamId, isFavorite) {
 
 // Fonction pour réactiver un stream désactivé
 export async function reactivateStream(eventId, streamId) {
-  const res = await fetch(`${API}/events/${eventId}/streams/${streamId}/reactivate`, {
+  const res = await fetchWithFallback(`/events/${eventId}/streams/${streamId}/reactivate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }
   });
@@ -108,7 +147,7 @@ export async function reactivateStream(eventId, streamId) {
 }
 
 export async function updateStream(eventId, streamId, data) {
-  const res = await fetch(`${API}/events/${eventId}/streams/${streamId}`, {
+  const res = await fetchWithFallback(`/events/${eventId}/streams/${streamId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
@@ -117,7 +156,7 @@ export async function updateStream(eventId, streamId, data) {
 }
 
 export async function pauseStream(eventId, streamId) {
-  const res = await fetch(`${API}/events/${eventId}/streams/${streamId}/pause`, {
+  const res = await fetchWithFallback(`/events/${eventId}/streams/${streamId}/pause`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }
   });
@@ -125,9 +164,15 @@ export async function pauseStream(eventId, streamId) {
 }
 
 export async function startStream(eventId, streamId) {
-  const res = await fetch(`${API}/events/${eventId}/streams/${streamId}/start`, {
+  const res = await fetchWithFallback(`/events/${eventId}/streams/${streamId}/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }
   });
+  return readJsonOrThrow(res);
+}
+
+// Récupérer le titre YouTube avec repli si la base API relative renvoie du HTML
+export async function getYoutubeTitle(videoId) {
+  const res = await fetchWithFallback(`/youtube/title/${videoId}`);
   return readJsonOrThrow(res);
 }

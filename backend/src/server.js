@@ -24,10 +24,38 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
-// Autoriser toutes les origines en développement pour éviter les erreurs CORS locales
-app.use(cors());
-// Répondre aux préflight OPTIONS de manière générique (inclut SSE)
-app.options('*', cors());
+// Configuration CORS stricte et configurable
+const isProd = process.env.NODE_ENV === 'production';
+const allowedOriginsEnv = process.env.CORS_ALLOWED_ORIGINS || '';
+const ALLOWED_ORIGINS = new Set(
+  allowedOriginsEnv
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+);
+if (process.env.FRONTEND_ORIGIN) {
+  ALLOWED_ORIGINS.add(process.env.FRONTEND_ORIGIN.trim());
+}
+const ALLOW_ALL = process.env.CORS_ALLOW_ALL
+  ? process.env.CORS_ALLOW_ALL === 'true'
+  : !isProd;
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Autoriser requêtes sans en-tête Origin (ex: curl) et en dev si ALLOW_ALL
+    if (ALLOW_ALL || !origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.has(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+// Préflight générique (inclut SSE)
+app.options('*', cors(corsOptions));
 
 // Compression conditionnelle: ne pas compresser les flux SSE
 const shouldCompress = (req, res) => {
@@ -130,7 +158,7 @@ function startPolling(eventId) {
       const next = s.next_poll_at ? new Date(s.next_poll_at) : new Date(0);
       return now >= next;
     });
-    if (!dueStreams.length) return;
+    // Même si aucun stream n'est "due" à ce tick, on produit quand même un échantillon
     const ids = dueStreams.map(s => s.video_id);
     const chunks = [];
     while (ids.length) chunks.push(ids.splice(0, 50));
@@ -194,23 +222,30 @@ function startPolling(eventId) {
       }
     }
     
-    // Si aucun stream dû, rien à notifier
-    // Mettre à jour total à partir de la dernière valeur connue pour les streams non mis à jour
-    if (!Object.keys(streamStates).length) return;
+    // Construire l'état fusionné et calculer le total sur tous les streams ACTIFS (non désactivés et non en pause)
     const prev = ev.state || { total: 0, streams: {} };
-    const changedTotal = total !== prev.total;
+    const mergedStreams = { ...prev.streams, ...streamStates };
+    const activeIds = new Set(ev.streams.filter(s => !s.is_disabled && !s.is_paused).map(s => s.id));
+    let totalNext = 0;
+    for (const s of ev.streams) {
+      if (!activeIds.has(s.id)) continue;
+      const st = mergedStreams[s.id];
+      const v = (st && typeof st.current === 'number') ? st.current : (Number(st?.current) || 0);
+      totalNext += v;
+    }
     let streamsChanged = false;
     for (const [sid, st] of Object.entries(streamStates)) {
       const prevSt = prev.streams[sid];
       if (!prevSt || prevSt.current !== st.current || prevSt.online !== st.online) { streamsChanged = true; break; }
     }
+    const changedTotal = totalNext !== prev.total;
     // Mise à jour de l'état
-    ev.state = { total, streams: { ...prev.streams, ...streamStates } };
-    // Écriture DB et SSE uniquement si changement
-    const writeUnchanged = process.env.WRITE_UNCHANGED_SAMPLES === 'true';
+    ev.state = { total: totalNext, streams: mergedStreams };
+    // Écriture DB et SSE uniquement si changement (ou si WRITE_UNCHANGED_SAMPLES)
+    const writeUnchanged = (process.env.WRITE_UNCHANGED_SAMPLES === 'true') || (!dueStreams.length);
     if (changedTotal || streamsChanged || writeUnchanged) {
-      await pool.query('INSERT INTO samples(event_id, ts, total) VALUES($1,$2,$3)', [ev.id, now, total]);
-      const payload = JSON.stringify({ type: 'tick', data: { ts: now, total, streams: Object.values(ev.state.streams) } });
+      await pool.query('INSERT INTO samples(event_id, ts, total) VALUES($1,$2,$3)', [ev.id, now, totalNext]);
+      const payload = JSON.stringify({ type: 'tick', data: { ts: now, total: totalNext, streams: Object.values(ev.state.streams) } });
       const set = clients.get(ev.id) || new Set();
       for (const res of set) res.write(`data: ${payload}\n\n`);
     }
@@ -386,11 +421,14 @@ app.get('/events/:id/now', (req, res) => {
 app.get('/events/:id/stream', async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
-    // CORS pour SSE: autoriser l'origine et éviter le buffering proxy
-    const origin = req.headers.origin || '*';
+    // CORS pour SSE: autoriser seulement les origines configurées
+    const reqOrigin = req.headers.origin;
+    const isAllowed = ALLOW_ALL || !reqOrigin || ALLOWED_ORIGINS.has(reqOrigin);
+    const origin = isAllowed ? (reqOrigin || '*') : Array.from(ALLOWED_ORIGINS)[0] || '*';
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Max-Age', '600');
     res.setHeader('Vary', 'Origin');
     // Indiquer aux reverse proxies (ex: Nginx) de ne pas bufferiser le flux SSE
     res.setHeader('X-Accel-Buffering', 'no');
@@ -420,10 +458,13 @@ app.get('/events/:id/stream', async (req, res) => {
 });
 // Préflight dédié pour la route SSE (utile si le client envoie des headers custom)
 app.options('/events/:id/stream', (req, res) => {
-  const origin = req.headers.origin || '*';
+  const reqOrigin = req.headers.origin;
+  const isAllowed = ALLOW_ALL || !reqOrigin || ALLOWED_ORIGINS.has(reqOrigin);
+  const origin = isAllowed ? (reqOrigin || '*') : Array.from(ALLOWED_ORIGINS)[0] || '*';
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Max-Age', '600');
   res.setHeader('Vary', 'Origin');
   res.status(204).end();
 });

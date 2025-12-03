@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getEvent, addStream, removeStream, pauseEvent, startEvent, reactivateStream, updateStream, pauseStream, startStream, toggleStreamFavorite } from '../api.js';
+import { getEvent, addStream, removeStream, pauseEvent, startEvent, reactivateStream, updateStream, pauseStream, startStream, toggleStreamFavorite, getYoutubeTitle } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
 
@@ -103,11 +103,18 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
     customInterval: stream.custom_interval_sec || ''
   });
 
+  const [deleteError, setDeleteError] = useState(null);
   const handleDelete = async () => {
+    setDeleteError(null);
     setIsDeleting(true);
-    setTimeout(() => {
-      onDelete(stream.id);
-    }, 500);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await onDelete(stream.id);
+    } catch (e) {
+      console.error('Suppression du flux échouée:', e);
+      setDeleteError(e.message || 'Échec de la suppression du flux');
+      setIsDeleting(false);
+    }
   };
 
   const handleReactivate = async () => {
@@ -486,6 +493,9 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
         >
           {isDeleting ? '🗑️ Suppression...' : '❌ Supprimer'}
         </button>
+        {deleteError && (
+          <div style={{ color: '#ef4444', marginTop: '0.5rem', fontSize: '0.85rem' }}>{deleteError}</div>
+        )}
       </div>
     </div>
   );
@@ -527,23 +537,19 @@ export default function EventDetail() {
         const url = new URL(urlOrId);
         videoId = url.searchParams.get('v') || url.pathname.split('/').pop();
       }
-      
-      // Appel à l'API backend pour récupérer le titre (via VITE_API_URL ou /api)
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      // Appel à l'API backend pour récupérer le titre via la couche API (avec repli)
       // Annule toute requête précédente
       if (titleAbortRef.current) titleAbortRef.current.abort();
       const controller = new AbortController();
       titleAbortRef.current = controller;
-      const response = await fetch(`${API_BASE}/youtube/title/${videoId}`, { signal: controller.signal });
-      
-      if (response.ok) {
-        const data = await response.json();
+      const data = await getYoutubeTitle(videoId);
+      if (data && typeof data.title === 'string') {
         const title = data.title;
         setAutoTitle(title);
         // Remplir automatiquement le label avec le titre de la vidéo
         setForm(prev => ({ ...prev, label: title }));
       } else {
-        console.error('Erreur lors de la récupération du titre:', response.status);
+        console.error('Réponse inattendue lors de la récupération du titre:', data);
       }
     } catch (error) {
       if (error.name !== 'AbortError') {
