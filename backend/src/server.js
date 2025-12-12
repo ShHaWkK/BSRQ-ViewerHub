@@ -117,9 +117,9 @@ function parseRange(req, defaultMinutes) {
 }
 
 // --- Authentification simple par cookie/token ---
-const AUTH_SECRET = process.env.AUTH_SECRET || 'dev_secret_change_me';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
-const CLIENT_PASSWORD = process.env.CLIENT_PASSWORD || 'clientpw';
+const AUTH_SECRET = (process.env.AUTH_SECRET || 'dev_secret_change_me').trim();
+const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || 'changeme').trim();
+const CLIENT_PASSWORD = (process.env.CLIENT_PASSWORD || 'clientpw').trim();
 
 function base64url(buf) {
   return buf.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -414,7 +414,9 @@ app.post('/auth/magic', requireAuth, (req, res) => {
   const redirect = typeof req.body?.redirect === 'string' ? req.body.redirect : (aud === 'admin' ? '/admin' : '/events');
   if (!isSafeRedirect(redirect)) return res.status(400).json({ error: 'invalid_redirect' });
   const token = createToken(aud, ttlSec);
-  const url = `/api/auth/magic?token=${encodeURIComponent(token)}&redirect=${encodeURIComponent(redirect)}&aud=${encodeURIComponent(aud)}`;
+  const relative = `/api/auth/magic?token=${encodeURIComponent(token)}&redirect=${encodeURIComponent(redirect)}&aud=${encodeURIComponent(aud)}`;
+  const base = (process.env.FRONTEND_PUBLIC_URL || process.env.FRONTEND_ORIGIN || '').trim().replace(/\/$/, '');
+  const url = base ? `${base}${relative}` : relative;
   res.json({ url, ttlSec, aud });
 });
 
