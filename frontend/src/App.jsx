@@ -5,17 +5,23 @@ import Admin from './pages/Admin.jsx';
 import EventDetail from './pages/EventDetail.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import LiveViewer from './pages/LiveViewer.jsx';
+import Login from './pages/Login.jsx';
+import ProtectedRoute from './components/ProtectedRoute.jsx';
+import ClientHome from './pages/ClientHome.jsx';
 import './styles.css';
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/admin" element={<Admin />} />
-        <Route path="/admin/event/:id" element={<EventDetail />} />
-        <Route path="/event/:id/dashboard" element={<Dashboard />} />
-        <Route path="/event/:id/live" element={<LiveViewer />} />
-        <Route path="*" element={<Navigate to="/admin" replace />} />
+        <Route path="/" element={<ProtectedRoute aud="client"><ClientHome /></ProtectedRoute>} />
+        <Route path="/events" element={<ProtectedRoute aud="client"><ClientHome /></ProtectedRoute>} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/admin" element={<ProtectedRoute aud="admin"><Admin /></ProtectedRoute>} />
+        <Route path="/admin/event/:id" element={<ProtectedRoute aud="admin"><EventDetail /></ProtectedRoute>} />
+        <Route path="/event/:id/dashboard" element={<ProtectedRoute aud="admin"><Dashboard /></ProtectedRoute>} />
+        <Route path="/event/:id/live" element={<ProtectedRoute aud="client"><LiveViewer /></ProtectedRoute>} />
+        <Route path="*" element={<Navigate to="/events" replace />} />
       </Routes>
     </BrowserRouter>
   );

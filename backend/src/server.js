@@ -14,6 +14,7 @@ import compression from 'compression';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import crypto from 'crypto';
 
 import pool, { migrate } from './db.js';
 import { extractVideoId, generateAutoLabel } from '../utils/youtube.js';
@@ -113,6 +114,92 @@ function parseRange(req, defaultMinutes) {
   }
   const minutes = clampMinutes(req.query.minutes, defaultMinutes);
   return { from, to, minutes };
+}
+
+// --- Authentification simple par cookie/token ---
+const AUTH_SECRET = process.env.AUTH_SECRET || 'dev_secret_change_me';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
+const CLIENT_PASSWORD = process.env.CLIENT_PASSWORD || 'clientpw';
+
+function base64url(buf) {
+  return buf.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function createToken(aud = 'admin', ttlSec = 60 * 60 * 24 * 60) {
+  const exp = Math.floor(Date.now() / 1000) + ttlSec;
+  const sig = base64url(crypto.createHmac('sha256', AUTH_SECRET).update(`${aud}|${exp}`).digest());
+  return `${exp}.${aud}.${sig}`;
+}
+
+function verifyToken(token, requiredAud) {
+  if (!token || typeof token !== 'string') return false;
+  const parts = token.split('.');
+  if (parts.length === 2) {
+    // Ancien format: exp.sig (considéré admin)
+    const exp = parseInt(parts[0], 10);
+    const sig = parts[1];
+    if (!Number.isFinite(exp) || exp <= Math.floor(Date.now() / 1000)) return false;
+    const expectedLegacy = base64url(crypto.createHmac('sha256', AUTH_SECRET).update(`admin|${exp}`).digest());
+    const ok = sig === expectedLegacy;
+    return requiredAud ? (requiredAud === 'admin' && ok) : ok;
+  }
+  if (parts.length !== 3) return false;
+  const exp = parseInt(parts[0], 10);
+  const aud = parts[1];
+  const sig = parts[2];
+  if (!Number.isFinite(exp) || exp <= Math.floor(Date.now() / 1000)) return false;
+  if (requiredAud && aud !== requiredAud) return false;
+  if (!['admin', 'client'].includes(aud)) return false;
+  const expected = base64url(crypto.createHmac('sha256', AUTH_SECRET).update(`${aud}|${exp}`).digest());
+  return sig === expected;
+}
+
+function isSafeRedirect(path) {
+  if (typeof path !== 'string') return false;
+  // Interdire schémas externes et doubles slash
+  if (/^https?:\/\//i.test(path)) return false;
+  if (!path.startsWith('/')) return false;
+  if (path.startsWith('/api/')) return false;
+  // Autoriser uniquement caractères simples
+  return /^\/[A-Za-z0-9_\-\/]*$/.test(path);
+}
+
+function parseCookies(req) {
+  const header = req.headers.cookie || '';
+  const out = {};
+  header.split(';').forEach(pair => {
+    const idx = pair.indexOf('=');
+    if (idx === -1) return;
+    const k = pair.slice(0, idx).trim();
+    const v = decodeURIComponent(pair.slice(idx + 1).trim());
+    out[k] = v;
+  });
+  return out;
+}
+
+function isAuthenticated(req, aud = 'admin') {
+  const cookies = parseCookies(req);
+  const tok = cookies.lp_auth || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  return verifyToken(tok, aud);
+}
+
+function setAuthCookie(res, token) {
+  const parts = String(token).split('.');
+  const exp = parts.length >= 2 ? parseInt(parts[0], 10) : Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 60);
+  const now = Math.floor(Date.now() / 1000);
+  const maxAgeMs = Math.max(1, (exp - now) * 1000);
+  res.cookie('lp_auth', token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    secure: false,
+    maxAge: maxAgeMs
+  });
+}
+
+function requireAuth(req, res, next) {
+  if (!isAuthenticated(req, 'admin')) return res.status(401).json({ error: 'unauthorized' });
+  next();
 }
 
 async function init() {
@@ -293,9 +380,47 @@ async function seed() {
 }
 
 // Routes API
+// Auth
+app.post('/auth/login', (req, res) => {
+  const password = (req.body && req.body.password) || '';
+  let aud = null;
+  if (password && password === ADMIN_PASSWORD) aud = 'admin';
+  else if (password && password === CLIENT_PASSWORD) aud = 'client';
+  if (!aud) return res.status(401).json({ error: 'invalid_credentials' });
+  const token = createToken(aud);
+  setAuthCookie(res, token);
+  res.json({ ok: true, aud });
+});
+
+app.get('/auth/check', (req, res) => {
+  const aud = typeof req.query.aud === 'string' ? req.query.aud : 'admin';
+  if (!isAuthenticated(req, aud)) return res.status(401).json({ error: 'unauthorized' });
+  res.json({ ok: true, aud });
+});
+
+app.get('/auth/magic', (req, res) => {
+  const tokenParam = req.query.token;
+  const redirect = typeof req.query.redirect === 'string' ? req.query.redirect : '/admin';
+  const aud = typeof req.query.aud === 'string' ? req.query.aud : undefined; // aud embarqué dans le token
+  if (!verifyToken(tokenParam, aud)) return res.status(400).json({ error: 'invalid_token' });
+  setAuthCookie(res, tokenParam);
+  res.redirect(isSafeRedirect(redirect) ? redirect : '/admin');
+});
+
+// Générer un lien magique signé côté serveur (protégé)
+app.post('/auth/magic', requireAuth, (req, res) => {
+  const ttlSec = Number.isFinite(parseInt(req.body?.ttlSec, 10)) ? parseInt(req.body.ttlSec, 10) : (60 * 60 * 24 * 60);
+  const aud = req.body?.aud === 'client' ? 'client' : 'admin';
+  const redirect = typeof req.body?.redirect === 'string' ? req.body.redirect : (aud === 'admin' ? '/admin' : '/events');
+  if (!isSafeRedirect(redirect)) return res.status(400).json({ error: 'invalid_redirect' });
+  const token = createToken(aud, ttlSec);
+  const url = `/api/auth/magic?token=${encodeURIComponent(token)}&redirect=${encodeURIComponent(redirect)}&aud=${encodeURIComponent(aud)}`;
+  res.json({ url, ttlSec, aud });
+});
+
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-app.post('/events', async (req, res) => {
+app.post('/events', requireAuth, async (req, res) => {
   const { name, pollIntervalSec } = req.body;
   const poll = Math.max(2, parseInt(pollIntervalSec || process.env.POLL_INTERVAL_DEFAULT)) * 1000;
   const id = genId();
@@ -321,7 +446,7 @@ app.get('/events/:id', (req, res) => {
 });
 
 // Mise à jour du nom et de l'intervalle d'un évènement
-app.put('/events/:id', async (req, res) => {
+app.put('/events/:id', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const name = typeof req.body.name === 'string' ? req.body.name.trim() : ev.name;
@@ -345,7 +470,7 @@ app.put('/events/:id', async (req, res) => {
   }
 });
 
-app.post('/events/:id/streams', async (req, res) => {
+app.post('/events/:id/streams', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { label, urlOrId, customTitle, customInterval } = req.body;
@@ -364,7 +489,7 @@ app.post('/events/:id/streams', async (req, res) => {
   }
 });
 
-app.delete('/events/:id/streams/:sid', async (req, res) => {
+app.delete('/events/:id/streams/:sid', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('DELETE FROM streams WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);
@@ -386,7 +511,7 @@ app.delete('/events/:id/streams/:sid', async (req, res) => {
 });
 
 // Suppression logique d'un évènement (soft delete)
-app.delete('/events/:id', async (req, res) => {
+app.delete('/events/:id', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     // Marquer comme supprimé dans la base
@@ -612,7 +737,7 @@ app.get('/events/:id/streams/:sid/history.csv', async (req, res) => {
 
 // Exports asynchrones basiques (job en mémoire)
 const exportJobs = new Map();
-app.post('/events/:id/export', async (req, res) => {
+app.post('/events/:id/export', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { type = 'total', sid, minutes, from, to } = req.body || {};
@@ -705,7 +830,7 @@ app.get('/exports/:jobId/download', (req, res) => {
 });
 
 // Routes pour contrôler la pause/start
-app.post('/events/:id/pause', async (req, res) => {
+app.post('/events/:id/pause', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE events SET is_paused = TRUE WHERE id = $1', [ev.id]);
@@ -721,7 +846,7 @@ app.post('/events/:id/pause', async (req, res) => {
   }
 });
 
-app.post('/events/:id/start', async (req, res) => {
+app.post('/events/:id/start', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE events SET is_paused = FALSE WHERE id = $1', [ev.id]);
@@ -737,7 +862,7 @@ app.post('/events/:id/start', async (req, res) => {
 });
 
 // Routes pour gérer les favoris
-app.post('/events/:id/streams/:sid/favorite', async (req, res) => {
+app.post('/events/:id/streams/:sid/favorite', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { is_favorite } = req.body;
@@ -753,7 +878,7 @@ app.post('/events/:id/streams/:sid/favorite', async (req, res) => {
 });
 
 // Route pour réactiver un stream désactivé
-app.post('/events/:id/streams/:sid/reactivate', async (req, res) => {
+app.post('/events/:id/streams/:sid/reactivate', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE streams SET is_disabled = FALSE, failure_count = 0, last_failure_at = NULL WHERE id = $1 AND event_id = $2', [req.params.sid, ev.id]);
@@ -800,7 +925,7 @@ app.get('/youtube/title/:videoId', async (req, res) => {
 });
 
 // Route pour modifier un stream existant
-app.put('/events/:id/streams/:sid', async (req, res) => {
+app.put('/events/:id/streams/:sid', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { label, customTitle, customInterval } = req.body;
@@ -823,7 +948,7 @@ app.put('/events/:id/streams/:sid', async (req, res) => {
 });
 
 // Pause d'un flux individuel
-app.post('/events/:id/streams/:sid/pause', async (req, res) => {
+app.post('/events/:id/streams/:sid/pause', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE streams SET is_paused=TRUE WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);
@@ -840,7 +965,7 @@ app.post('/events/:id/streams/:sid/pause', async (req, res) => {
 });
 
 // Démarrage d'un flux individuel
-app.post('/events/:id/streams/:sid/start', async (req, res) => {
+app.post('/events/:id/streams/:sid/start', requireAuth, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE streams SET is_paused=FALSE WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);

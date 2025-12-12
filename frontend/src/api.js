@@ -176,3 +176,15 @@ export async function getYoutubeTitle(videoId) {
   const res = await fetchWithFallback(`/youtube/title/${videoId}`);
   return readJsonOrThrow(res);
 }
+
+// Génération d'un magic link côté serveur (protégé)
+export async function generateMagicLink(redirect, ttlSec = 60 * 60 * 24 * 60, aud = 'admin') {
+  const res = await fetchWithFallback('/auth/magic', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ redirect, ttlSec, aud })
+  });
+  const data = await readJsonOrThrow(res);
+  if (!data?.url) throw new Error('Réponse invalide lors de la génération du magic link');
+  return data.url;
+}

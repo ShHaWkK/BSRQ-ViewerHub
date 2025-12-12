@@ -281,11 +281,12 @@ export default function Dashboard() {
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
   let API_BASE = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
-  // Si la base est relative (ex: '/api') et qu'on accède directement au serveur frontend (3019),
-  // utiliser le backend direct sur :4000 pour éviter que le frontend renvoie du HTML.
+  // Si la base est relative (ex: '/api') et qu'on accède via un serveur dev (3000/3001/3019),
+  // basculer vers le backend direct sur :4000 pour garantir SSE et éviter du HTML côté frontend.
   if (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined') {
     const port = window.location.port;
-    if (port === '3019') {
+    const devPorts = new Set(['3000', '3001', '3019']);
+    if (devPorts.has(port)) {
       API_BASE = `${proto}//${host}:4000`;
     }
   }
@@ -321,6 +322,16 @@ export default function Dashboard() {
       // Afficher par défaut les dernières 24h pour voir les variations quotidiennes
       const params = `minutes=1440`;
       esRef.current = new EventSource(`${API_BASE.replace(/\/+$/, '')}/events/${id}/stream?${params}`);
+      // Fallback automatique en cas d'erreur (ex: proxy dev renvoyant du HTML)
+      esRef.current.onerror = () => {
+        try {
+          if (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined') {
+            const direct = `${proto}//${host}:4000`;
+            esRef.current.close();
+            esRef.current = new EventSource(`${direct.replace(/\/+$/, '')}/events/${id}/stream?${params}`);
+          }
+        } catch {}
+      };
       esRef.current.onmessage = ev => {
         const raw = ev.data;
         if (!raw || raw[0] !== '{') return;
@@ -422,10 +433,19 @@ export default function Dashboard() {
     (async () => {
       try {
         const url = `${API_BASE}/events/${id}/history?minutes=1440&streams=1&limit=5000`;
-        const res = await fetch(url);
+        let res = await fetch(url);
         if (!res.ok) return; // SSE init fera le fallback
         const ct = res.headers.get('content-type') || '';
-        if (!ct.includes('application/json')) return;
+        // Si le serveur dev renvoie du HTML, refaire la requête directement sur :4000
+        if (!ct.includes('application/json')) {
+          if (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined') {
+            const direct = `${proto}//${host}:4000`;
+            res = await fetch(`${direct}/events/${id}/history?minutes=1440&streams=1&limit=5000`);
+            if (!res.ok) return;
+          } else {
+            return;
+          }
+        }
         const data = await res.json();
         if (aborted) return;
         if (Array.isArray(data.history)) setHistory(data.history);
@@ -589,9 +609,15 @@ export default function Dashboard() {
     a.click();
     document.body.removeChild(a);
   };
-  const downloadCSV = (filename, rows) => {
-    const header = 'timestamp,viewers\n';
-    const csv = header + rows.map(r => `${new Date(r.ts).toISOString()},${r.current ?? r.total ?? 0}`).join('\n');
+  // Export CSV local (2 colonnes: Heure, Total de spectateurs de l'events)
+  const exportTotalCsvLocal = (filename) => {
+    const header = "Heure,Total de spectateurs de l'events\n";
+    const rows = (Array.isArray(history) ? history : []).map(r => {
+      const heure = new Date(r.ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const total = (typeof r.total === 'number' ? r.total : Number(r.total) || 0);
+      return `${heure},${total}`;
+    });
+    const csv = header + rows.join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -782,18 +808,7 @@ export default function Dashboard() {
               </button>
               <button
                 onClick={() => {
-                  const nowIso = new Date().toISOString();
-                  const url = (event?.created_at)
-                    ? `${API_BASE}/events/${id}/history.csv?from=${encodeURIComponent(event.created_at)}&to=${encodeURIComponent(nowIso)}`
-                    : `${API_BASE}/events/${id}/history.csv?minutes=180`;
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = (event?.created_at)
-                    ? `event_${id}_history_all.csv`
-                    : `event_${id}_history_180m.csv`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
+                  exportTotalCsvLocal(`event_${id}_total_viewers.csv`);
                 }}
                 style={{
                   background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
@@ -801,7 +816,7 @@ export default function Dashboard() {
                   borderRadius: '10px', cursor: 'pointer'
                 }}
               >
-                Exporter CSV
+                Exporter CSV (Heure, Total)
               </button>
               <button
                 onClick={async () => {

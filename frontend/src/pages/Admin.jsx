@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { getEvents, createEvent, updateEvent, deleteEvent } from '../api.js';
+import { getEvents, createEvent, updateEvent, deleteEvent, generateMagicLink } from '../api.js';
 import Modal from '../components/Modal.jsx';
 import customLogo from '../assets/custom-logo.svg';
 
@@ -93,7 +93,7 @@ const AnimatedBackground = () => {
 };
 
 // Composant Event Card animé
-const EventCard = ({ event, index, onEdit, onDelete }) => {
+const EventCard = ({ event, index, onEdit, onDelete, onCopyMagic }) => {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
@@ -198,6 +198,32 @@ const EventCard = ({ event, index, onEdit, onDelete }) => {
           </Link>
           
           <button
+            onClick={() => onCopyMagic(event)}
+            style={{
+              background: 'linear-gradient(45deg, #22c55e, #10b981)',
+              color: 'white',
+              border: 'none',
+              padding: '0.75rem 1.5rem',
+              borderRadius: '12px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transform: isHovered ? 'scale(1.05)' : 'scale(1)',
+              transition: 'all 0.3s ease',
+              boxShadow: '0 4px 15px rgba(34, 197, 94, 0.4)'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'scale(1.1)';
+              e.target.style.boxShadow = '0 6px 20px rgba(34, 197, 94, 0.6)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = isHovered ? 'scale(1.05)' : 'scale(1)';
+              e.target.style.boxShadow = '0 4px 15px rgba(34, 197, 94, 0.4)';
+            }}
+          >
+            🔗 Copier Magic Link
+          </button>
+
+          <button
             onClick={() => onEdit(event)}
             style={{
               background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
@@ -258,6 +284,8 @@ export default function Admin() {
   const [events, setEvents] = useState([]);
   const [form, setForm] = useState({ name: '', pollIntervalSec: '5' });
   const [isLoading, setIsLoading] = useState(true);
+  const [toast, setToast] = useState('');
+  const [isCopying, setIsCopying] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [banner, setBanner] = useState('');
@@ -597,8 +625,22 @@ export default function Admin() {
               </div>
             ) : (
               <div style={{ display: 'grid', gap: '1rem' }}>
-                {events.map((event, index) => (
-                  <EventCard key={event.id} event={event} index={index} onEdit={(ev) => {
+            {events.map((event, index) => (
+                  <EventCard key={event.id} event={event} index={index} onCopyMagic={async (ev) => {
+                    if (isCopying) return;
+                    setIsCopying(true);
+                    try {
+                      const url = await generateMagicLink(`/event/${ev.id}/dashboard`);
+                      await navigator.clipboard.writeText(url);
+                      setToast('Magic link copié dans le presse-papiers');
+                      setTimeout(() => setToast(''), 3000);
+                    } catch (e) {
+                      setToast('Erreur lors de la génération du magic link');
+                      setTimeout(() => setToast(''), 3000);
+                    } finally {
+                      setIsCopying(false);
+                    }
+                  }} onEdit={(ev) => {
                     setEditEvent(ev);
                     setEditName(ev.name || '');
                     setEditInterval(String(ev.pollIntervalSec || 5));
@@ -726,6 +768,24 @@ export default function Admin() {
           )}
         </div>
       </Modal>
+
+      {/* Toast */}
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: 20,
+          right: 20,
+          background: 'rgba(16, 185, 129, 0.95)',
+          color: 'white',
+          padding: '0.75rem 1rem',
+          borderRadius: 12,
+          boxShadow: '0 10px 30px rgba(16, 185, 129, 0.5)',
+          zIndex: 1000,
+          fontWeight: 600
+        }}>
+          {toast}
+        </div>
+      )}
           <label htmlFor="edit-interval" style={{ position: 'absolute', left: '-10000px' }}>Intervalle de polling (secondes)</label>
           <input
             type="number"
