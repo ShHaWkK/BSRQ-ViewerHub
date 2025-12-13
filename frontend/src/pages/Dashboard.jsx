@@ -1,4 +1,3 @@
-// Dashboard.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Line } from 'react-chartjs-2';
@@ -11,18 +10,27 @@ import {
   Tooltip,
   Legend,
   Filler,
-  Decimation
+  Decimation,
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
-import EventDetail from './EventDetail.jsx'; // gardé (même si non utilisé ici)
+
 import { getEvent } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
-ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Tooltip, Legend, Filler, Decimation);
+ChartJS.register(
+  LineElement,
+  PointElement,
+  LinearScale,
+  TimeScale,
+  Tooltip,
+  Legend,
+  Filler,
+  Decimation
+);
 
-/* =========================
-   Particles
-========================= */
+/* --------------------------
+   Particle background
+--------------------------- */
 const ParticleSystem = () => {
   const canvasRef = useRef(null);
   const particlesRef = useRef([]);
@@ -33,7 +41,8 @@ const ParticleSystem = () => {
     if (!canvas) return;
 
     const prefersReduced =
-      window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.matchMedia &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (prefersReduced) return;
 
     const ctx = canvas.getContext('2d');
@@ -42,7 +51,6 @@ const ParticleSystem = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
     };
-    updateCanvasSize();
 
     const createParticles = () => {
       particlesRef.current = [];
@@ -55,13 +63,14 @@ const ParticleSystem = () => {
           vy: (Math.random() - 0.5) * 1,
           size: Math.random() * 2 + 1,
           opacity: Math.random() * 0.3 + 0.1,
-          hue: Math.random() * 360
+          hue: Math.random() * 360,
         });
       }
     };
 
     const animate = () => {
       if (document.hidden) return;
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       particlesRef.current.forEach((p) => {
@@ -81,6 +90,7 @@ const ParticleSystem = () => {
       animationRef.current = requestAnimationFrame(animate);
     };
 
+    updateCanvasSize();
     createParticles();
     animate();
 
@@ -90,7 +100,9 @@ const ParticleSystem = () => {
     };
 
     const handleVisibility = () => {
-      if (!document.hidden && !animationRef.current) animate();
+      if (!document.hidden && !animationRef.current) {
+        animate();
+      }
       if (document.hidden && animationRef.current) {
         cancelAnimationFrame(animationRef.current);
         animationRef.current = null;
@@ -119,48 +131,56 @@ const ParticleSystem = () => {
         height: '100%',
         pointerEvents: 'none',
         zIndex: 0,
-        opacity: 0.2
+        opacity: 0.2,
       }}
     />
   );
 };
 
-/* =========================
-   Stream Card
-========================= */
+/* --------------------------
+   Stream card
+--------------------------- */
 const DynamicStreamCard = ({ label, current, online }) => {
-  const [displayViewers, setDisplayViewers] = useState(current);
+  const [displayViewers, setDisplayViewers] = useState(current ?? 0);
   const [isAnimating, setIsAnimating] = useState(false);
 
   useEffect(() => {
-    if (typeof current !== 'number') return;
-    if (current === displayViewers) return;
+    const cur = typeof current === 'number' ? current : Number(current) || 0;
 
-    setIsAnimating(true);
-    const duration = 1000;
-    const startTime = Date.now();
-    const startValue = displayViewers;
-    const targetValue = current;
+    if (cur !== displayViewers) {
+      setIsAnimating(true);
 
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const value = Math.round(startValue + (targetValue - startValue) * eased);
-      setDisplayViewers(value);
+      const duration = 700;
+      const startTime = Date.now();
+      const startValue = displayViewers;
+      const targetValue = cur;
 
-      if (progress < 1) requestAnimationFrame(animate);
-      else setIsAnimating(false);
-    };
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
 
-    animate();
-  }, [current]); // volontaire: pas displayViewers dans deps
+        const v = Math.round(startValue + (targetValue - startValue) * eased);
+        setDisplayViewers(v);
+
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          setIsAnimating(false);
+        }
+      };
+
+      animate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
 
   return (
     <div
       className="stream-card"
       style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
+        background:
+          'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
         backdropFilter: 'blur(10px)',
         border: '1px solid rgba(255,255,255,0.2)',
         borderRadius: '16px',
@@ -170,17 +190,15 @@ const DynamicStreamCard = ({ label, current, online }) => {
         position: 'relative',
         overflow: 'hidden',
         transform: 'translateY(0)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+        boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
       }}
       onMouseEnter={(e) => {
-        const el = e.currentTarget;
-        el.style.transform = 'translateY(-5px) scale(1.02)';
-        el.style.boxShadow = '0 20px 40px rgba(0,0,0,0.4)';
+        e.currentTarget.style.transform = 'translateY(-5px) scale(1.02)';
+        e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.4)';
       }}
       onMouseLeave={(e) => {
-        const el = e.currentTarget;
-        el.style.transform = 'translateY(0) scale(1)';
-        el.style.boxShadow = '0 8px 32px rgba(0,0,0,0.3)';
+        e.currentTarget.style.transform = 'translateY(0) scale(1)';
+        e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.3)';
       }}
     >
       <div
@@ -190,14 +208,21 @@ const DynamicStreamCard = ({ label, current, online }) => {
           left: '-100%',
           width: '100%',
           height: '100%',
-          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)',
-          animation: online ? 'shine 3s infinite' : 'none'
+          background:
+            'linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)',
+          animation: online ? 'shine 3s infinite' : 'none',
         }}
       />
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: '1rem',
+        }}
+      >
         <h3
-          title={label}
           style={{
             margin: 0,
             fontSize: '1.1rem',
@@ -208,10 +233,6 @@ const DynamicStreamCard = ({ label, current, online }) => {
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
-            maxWidth: '70%',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis'
           }}
         >
           {label}
@@ -224,10 +245,16 @@ const DynamicStreamCard = ({ label, current, online }) => {
               height: '8px',
               borderRadius: '50%',
               backgroundColor: online ? '#10b981' : '#ef4444',
-              animation: online ? 'pulse 2s infinite' : 'none'
+              animation: online ? 'pulse 2s infinite' : 'none',
             }}
           />
-          <span style={{ fontSize: '0.8rem', color: online ? '#10b981' : '#ef4444', fontWeight: '500' }}>
+          <span
+            style={{
+              fontSize: '0.8rem',
+              color: online ? '#10b981' : '#ef4444',
+              fontWeight: '500',
+            }}
+          >
             {online ? 'LIVE' : 'OFFLINE'}
           </span>
         </div>
@@ -242,12 +269,18 @@ const DynamicStreamCard = ({ label, current, online }) => {
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
-            animation: isAnimating ? 'glow 0.5s ease-in-out' : 'none'
+            animation: isAnimating ? 'glow 0.5s ease-in-out' : 'none',
           }}
         >
-          {Number(displayViewers || 0).toLocaleString()}
+          {displayViewers?.toLocaleString() || 0}
         </div>
-        <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.7)', marginTop: '0.25rem' }}>
+        <div
+          style={{
+            fontSize: '0.9rem',
+            color: 'rgba(255,255,255,0.7)',
+            marginTop: '0.25rem',
+          }}
+        >
           spectateurs
         </div>
       </div>
@@ -258,17 +291,19 @@ const DynamicStreamCard = ({ label, current, online }) => {
           height: '4px',
           backgroundColor: 'rgba(255,255,255,0.1)',
           borderRadius: '2px',
-          overflow: 'hidden'
+          overflow: 'hidden',
         }}
       >
         <div
           style={{
             height: '100%',
-            background: online ? 'linear-gradient(90deg, #10b981, #3b82f6)' : 'linear-gradient(90deg, #6b7280, #9ca3af)',
+            background: online
+              ? 'linear-gradient(90deg, #10b981, #3b82f6)'
+              : 'linear-gradient(90deg, #6b7280, #9ca3af)',
             borderRadius: '2px',
-            width: `${Math.min(100, (Number(displayViewers || 0) / 50000) * 100)}%`,
+            width: `${Math.min(100, (displayViewers / 50000) * 100)}%`,
             transition: 'width 1s cubic-bezier(0.4, 0, 0.2, 1)',
-            boxShadow: online ? '0 0 10px rgba(16, 185, 129, 0.5)' : 'none'
+            boxShadow: online ? '0 0 10px rgba(16, 185, 129, 0.5)' : 'none',
           }}
         />
       </div>
@@ -276,27 +311,46 @@ const DynamicStreamCard = ({ label, current, online }) => {
   );
 };
 
-/* =========================
+/* --------------------------
+   Helpers chart ref
+--------------------------- */
+const getChartInstance = (refObj) => {
+  const r = refObj?.current;
+  if (!r) return null;
+  // react-chartjs-2 versions differ: sometimes ref is chart instance, sometimes { chart }
+  return r.chart || r;
+};
+
+/* --------------------------
    Dashboard
-========================= */
+--------------------------- */
 export default function Dashboard() {
   const { id } = useParams();
 
-  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-  const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+  const host =
+    typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+  const proto =
+    typeof window !== 'undefined' ? window.location.protocol : 'http:';
 
-  const API_BASE = useMemo(() => {
-    let base = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
+  let API_BASE = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
 
-    // dev: si VITE_API_URL est relative, forcer backend :4000 depuis ports dev
-    if (typeof base === 'string' && base.startsWith('/') && typeof window !== 'undefined') {
-      const port = window.location.port;
-      const devPorts = new Set(['3000', '3001', '3019']);
-      if (devPorts.has(port)) base = `${proto}//${host}:4000`;
+  // Dev proxy fallback: si API_BASE est relative, basculer SSE/Fetch vers :4000 en dev ports
+  if (
+    typeof API_BASE === 'string' &&
+    API_BASE.startsWith('/') &&
+    typeof window !== 'undefined'
+  ) {
+    const port = window.location.port;
+    const devPorts = new Set(['3000', '3001', '3019']);
+    if (devPorts.has(port)) {
+      API_BASE = `${proto}//${host}:4000`;
     }
+  }
 
-    return String(base).replace(/\/+$/, '');
-  }, [host, proto]);
+  const SSE_BASE =
+    typeof API_BASE === 'string' && API_BASE.startsWith('/')
+      ? `${proto}//${host}:4000`
+      : API_BASE;
 
   const [event, setEvent] = useState(null);
   const [history, setHistory] = useState([]);
@@ -316,118 +370,73 @@ export default function Dashboard() {
   const esRef = useRef(null);
   const sseFlushTimerRef = useRef(null);
   const sseMonitorTimerRef = useRef(null);
-  const reconnectAttemptRef = useRef(0);
-  const reconnectTimerRef = useRef(null);
-
   const lastMsgTsRef = useRef(Date.now());
-  const lastTotalRef = useRef(0);
-  const createdAtRef = useRef(null);
 
-  const sseBufferRef = useRef({ totals: [], streams: new Map(), lastState: null });
+  const createdAtRef = useRef(null);
+  const pollIntervalSecRef = useRef(60);
+  const lastTotalRef = useRef(0);
+
+  const sseBufferRef = useRef({
+    totals: [],
+    streams: new Map(),
+    lastState: null,
+  });
+
+  // Rend le live "visible" sans saturer React
   const SSE_THROTTLE_MS = 250;
 
-  const getChartInstance = (refObj) => {
-    const r = refObj?.current;
-    if (!r) return null;
-    // react-chartjs-2 peut exposer soit l’instance directe, soit { chart }
-    if (typeof r.update === 'function') return r;
-    if (r.chart && typeof r.chart.update === 'function') return r.chart;
-    return null;
+  // IMPORTANT: downsampling qui garde TOUJOURS le dernier point (sinon le graphe “s’arrête”)
+  const MAX_POINTS = 3000;
+  const reduceSeries = (rows) => {
+    if (!Array.isArray(rows)) return [];
+    if (rows.length <= MAX_POINTS) return rows;
+
+    const stride = Math.ceil(rows.length / MAX_POINTS);
+    const out = [];
+    for (let i = 0; i < rows.length; i += stride) out.push(rows[i]);
+
+    const last = rows[rows.length - 1];
+    if (out[out.length - 1] !== last) out.push(last);
+
+    return out;
   };
 
-  // Helpers export
-  const downloadDataUrl = (filename, dataUrl) => {
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-
-  const exportTotalCsvLocal = (filename) => {
-    const header = "Heure,Total de spectateurs de l'events\n";
-    const rows = (Array.isArray(history) ? history : []).map((r) => {
-      const heure = new Date(r.ts).toLocaleTimeString('fr-FR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
-      const total = typeof r.total === 'number' ? r.total : Number(r.total) || 0;
-      return `${heure},${total}`;
-    });
-
-    const csv = header + rows.join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  // 1) Charger event (métadonnées)
+  /* --------------------------
+     Load event + SSE live stream
+  --------------------------- */
   useEffect(() => {
-    let aborted = false;
+    let cancelled = false;
 
+    // 1) Charger l’event (info + état initial)
     (async () => {
       try {
         const ev = await getEvent(id);
-        if (aborted) return;
-        setEvent(ev);
-        if (ev?.created_at) createdAtRef.current = ev.created_at;
+        if (cancelled) return;
 
-        const initTotal = typeof ev?.state?.total === 'number' ? ev.state.total : 0;
-        lastTotalRef.current = initTotal;
-        setPreviousTotal(initTotal);
-        setTotalViewers(initTotal);
-      } catch {}
+        setEvent(ev);
+
+        createdAtRef.current = ev?.created_at || null;
+        pollIntervalSecRef.current =
+          (ev?.pollIntervalSec && Number(ev.pollIntervalSec)) || 60;
+
+        const initialTotal =
+          typeof ev?.state?.total === 'number'
+            ? ev.state.total
+            : Number(ev?.state?.total) || 0;
+
+        lastTotalRef.current = initialTotal;
+        setPreviousTotal(initialTotal);
+        setTotalViewers(initialTotal);
+      } catch {
+        // silencieux: l’UI SSE init fera le reste si dispo
+      }
     })();
 
-    return () => {
-      aborted = true;
-    };
-  }, [id]);
-
-  // 2) SSE live (reconnexion + ajout point + update total)
-  useEffect(() => {
-    const cleanup = () => {
-      try { esRef.current?.close(); } catch {}
-      esRef.current = null;
-
-      if (sseFlushTimerRef.current) clearTimeout(sseFlushTimerRef.current);
-      sseFlushTimerRef.current = null;
-
-      if (sseMonitorTimerRef.current) clearInterval(sseMonitorTimerRef.current);
-      sseMonitorTimerRef.current = null;
-
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-
-      // reset buffer
-      sseBufferRef.current.totals = [];
-      sseBufferRef.current.streams = new Map();
-      sseBufferRef.current.lastState = null;
-    };
-
-    const scheduleReconnect = () => {
-      if (reconnectTimerRef.current) return;
-
-      const backoff = Math.min(30000, 1000 * Math.pow(2, reconnectAttemptRef.current));
-      reconnectAttemptRef.current += 1;
-
-      reconnectTimerRef.current = setTimeout(() => {
-        reconnectTimerRef.current = null;
-        setupES();
-      }, backoff);
-    };
-
-    const setupES = () => {
-      // stop previous
-      try { esRef.current?.close(); } catch {}
+    // 2) SSE setup
+    const cleanupES = () => {
+      try {
+        if (esRef.current) esRef.current.close();
+      } catch {}
       esRef.current = null;
 
       if (sseMonitorTimerRef.current) {
@@ -435,159 +444,177 @@ export default function Dashboard() {
         sseMonitorTimerRef.current = null;
       }
 
-      const url = `${API_BASE}/events/${id}/stream?minutes=1440`;
+      if (sseFlushTimerRef.current) {
+        clearTimeout(sseFlushTimerRef.current);
+        sseFlushTimerRef.current = null;
+      }
+    };
 
-      // Toujours withCredentials: si cookie auth -> indispensable
-      esRef.current = new EventSource(url, { withCredentials: true });
+    const setupES = () => {
+      if (cancelled) return;
 
+      cleanupES();
+
+      const params = `minutes=1440`;
+      const url = `${String(SSE_BASE).replace(/\/+$/, '')}/events/${id}/stream?${params}`;
+
+      esRef.current = new EventSource(url);
       lastMsgTsRef.current = Date.now();
 
+      // Monitor: si on ne reçoit rien, on reconnecte
+      sseMonitorTimerRef.current = setInterval(() => {
+        const pollSec = pollIntervalSecRef.current || 60;
+        const thresholdMs = Math.max(20000, pollSec * 2000);
+        if (Date.now() - lastMsgTsRef.current > thresholdMs) {
+          setupES();
+        }
+      }, 5000);
+
       esRef.current.onopen = () => {
-        reconnectAttemptRef.current = 0;
         lastMsgTsRef.current = Date.now();
       };
 
       esRef.current.onerror = () => {
-        try { esRef.current?.close(); } catch {}
+        // Reconnexion simple (EventSource réessaie déjà, mais on force un reset propre)
+        // pour éviter les états "bloqués" selon proxy/infra.
+        try {
+          if (esRef.current) esRef.current.close();
+        } catch {}
         esRef.current = null;
-        scheduleReconnect();
+
+        // petit backoff
+        setTimeout(() => {
+          if (!cancelled && !document.hidden) setupES();
+        }, 1000);
       };
 
       esRef.current.onmessage = (ev) => {
-        lastMsgTsRef.current = Date.now();
-
         const raw = ev.data;
         if (!raw || raw[0] !== '{') return;
 
         let msg;
-        try { msg = JSON.parse(raw); } catch { return; }
-
-        if (msg.type === 'init') {
-          const st = msg?.data?.state || null;
-
-          setEvent((prev) => {
-            // si on n’a pas encore l’event (métadonnées), on tente d’en créer un minimum
-            if (!prev) return { ...(msg?.data?.event || {}), state: st };
-            return { ...prev, state: st };
-          });
-
-          if (Array.isArray(msg?.data?.history)) setHistory(msg.data.history);
-
-          // init total
-          const initTotal = typeof st?.total === 'number' ? st.total : Number(st?.total) || 0;
-          lastTotalRef.current = initTotal;
-          setPreviousTotal(initTotal);
-          setTotalViewers(initTotal);
-
-          // init created_at si absent côté getEvent
-          if (!createdAtRef.current && msg?.data?.event?.created_at) {
-            createdAtRef.current = msg.data.event.created_at;
-          }
-
+        try {
+          msg = JSON.parse(raw);
+        } catch {
           return;
         }
 
+        lastMsgTsRef.current = Date.now();
+
+        if (msg.type === 'init') {
+          // état initial + history
+          const st = msg?.data?.state || null;
+          const hist = Array.isArray(msg?.data?.history) ? msg.data.history : [];
+
+          sseBufferRef.current.lastState = st;
+
+          setEvent((prev) => (prev ? { ...prev, state: st } : prev));
+          setHistory(hist);
+
+          // total initial
+          const initTotal =
+            typeof st?.total === 'number' ? st.total : Number(st?.total) || 0;
+
+          setPreviousTotal(initTotal);
+          setTotalViewers(initTotal);
+          lastTotalRef.current = initTotal;
+
+          // poll interval dynamique si backend le fournit
+          if (msg?.data?.pollIntervalSec) {
+            const p = Number(msg.data.pollIntervalSec);
+            if (Number.isFinite(p) && p > 0) pollIntervalSecRef.current = p;
+          }
+        }
+
         if (msg.type === 'tick') {
-          // buffer
+          const ts = msg.data.ts;
+          const total = msg.data.total;
+          const streamsArr = Array.isArray(msg.data.streams) ? msg.data.streams : [];
+
+          // buffer state
           sseBufferRef.current.lastState = {
-            total: msg.data.total,
-            streams: Object.fromEntries((msg.data.streams || []).map((s) => [s.id, s]))
+            total,
+            streams: Object.fromEntries(streamsArr.map((s) => [s.id, s])),
           };
 
-          sseBufferRef.current.totals.push({ ts: msg.data.ts, total: msg.data.total });
+          sseBufferRef.current.totals.push({ ts, total });
 
-          for (const s of msg.data.streams || []) {
+          for (const s of streamsArr) {
             const list = sseBufferRef.current.streams.get(s.id) || [];
-            list.push({ ts: msg.data.ts, current: s.current });
+            list.push({ ts, current: s.current });
             sseBufferRef.current.streams.set(s.id, list);
           }
 
-          if (!sseFlushTimerRef.current) {
+          const scheduleFlush = () => {
+            if (sseFlushTimerRef.current) return;
+
             sseFlushTimerRef.current = setTimeout(() => {
               sseFlushTimerRef.current = null;
 
               const buf = sseBufferRef.current;
 
-              // A) total + delta
+              // 1) état courant
               if (buf.lastState) {
-                const newTotal =
-                  typeof buf.lastState.total === 'number'
-                    ? buf.lastState.total
-                    : Number(buf.lastState.total) || 0;
-
-                setPreviousTotal(lastTotalRef.current);
-                setTotalViewers(newTotal);
-                lastTotalRef.current = newTotal;
-
                 setEvent((prev) => (prev ? { ...prev, state: buf.lastState } : prev));
+
+                const sum = Object.values(buf.lastState.streams || {}).reduce(
+                  (acc, s) => acc + (typeof s.current === 'number' ? s.current : Number(s.current) || 0),
+                  0
+                );
+
+                // delta display fiable
+                setPreviousTotal(lastTotalRef.current);
+                setTotalViewers(sum);
+                lastTotalRef.current = sum;
               }
 
-              // B) ajouter point au graphe (history)
+              // cutoff (éviter d’afficher avant created_at)
+              const cutoff =
+                createdAtRef.current ? new Date(createdAtRef.current).getTime() : 0;
+
+              // 2) historique total
               if (buf.totals.length) {
-                setHistory((prev) => {
-                  const next = prev.concat(buf.totals);
-
-                  // couper par created_at si connu
-                  const cutoffMs = createdAtRef.current ? new Date(createdAtRef.current).getTime() : 0;
-                  const filtered = cutoffMs
-                    ? next.filter((row) => new Date(row.ts).getTime() >= cutoffMs)
-                    : next;
-
-                  const MAX = 5000;
-                  return filtered.length > MAX ? filtered.slice(filtered.length - MAX) : filtered;
+                setHistory((h) => {
+                  const next = h.concat(buf.totals);
+                  buf.totals = [];
+                  return cutoff ? next.filter((row) => new Date(row.ts).getTime() >= cutoff) : next;
                 });
-                buf.totals = [];
               }
 
-              // C) historique par stream
+              // 3) historique par stream
               if (buf.streams.size) {
                 setStreamsHistory((prev) => {
-                  const cutoffMs = createdAtRef.current ? new Date(createdAtRef.current).getTime() : 0;
                   const next = { ...prev };
-
                   for (const [sid, arrNew] of buf.streams.entries()) {
-                    const arrOld = next[sid] || [];
-                    const merged = arrOld.concat(arrNew);
-                    const filtered = cutoffMs
-                      ? merged.filter((row) => new Date(row.ts).getTime() >= cutoffMs)
+                    const arr = next[sid] || [];
+                    const merged = arr.concat(arrNew);
+                    next[sid] = cutoff
+                      ? merged.filter((row) => new Date(row.ts).getTime() >= cutoff)
                       : merged;
-
-                    const MAX = 5000;
-                    next[sid] = filtered.length > MAX ? filtered.slice(filtered.length - MAX) : filtered;
                   }
+                  buf.streams.clear();
                   return next;
                 });
-                buf.streams.clear();
               }
 
-              // D) redraw chart
+              // 4) redraw chart pour être sûr (certaines configs chartjs/react-chartjs-2 le nécessitent)
               try {
                 const chart = getChartInstance(totalChartRef);
-                if (chart) chart.update('none');
+                if (chart && typeof chart.update === 'function') chart.update('none');
               } catch {}
             }, SSE_THROTTLE_MS);
-          }
+          };
+
+          scheduleFlush();
         }
       };
-
-      // Heartbeat: si plus de messages, reconnect
-      sseMonitorTimerRef.current = setInterval(() => {
-        // si ton backend tick toutes les 10–20s, 35s est safe
-        const THRESHOLD_MS = 35000;
-        if (Date.now() - lastMsgTsRef.current > THRESHOLD_MS) {
-          try { esRef.current?.close(); } catch {}
-          esRef.current = null;
-          scheduleReconnect();
-        }
-      }, 5000);
     };
 
     setupES();
 
     const handleVisibility = () => {
       if (document.hidden) {
-        try { esRef.current?.close(); } catch {}
-        esRef.current = null;
+        cleanupES();
       } else {
         setupES();
       }
@@ -596,23 +623,34 @@ export default function Dashboard() {
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
+      cancelled = true;
       document.removeEventListener('visibilitychange', handleVisibility);
-      cleanup();
+      cleanupES();
     };
-  }, [id, API_BASE]);
+  }, [id, SSE_BASE]);
 
-  // 3) Charger l’historique JSON initial (fallback + streams) sans casser le live
+  /* --------------------------
+     Load initial JSON history (fallback/complément)
+  --------------------------- */
   useEffect(() => {
     let aborted = false;
 
     (async () => {
       try {
-        const url = `${API_BASE}/events/${id}/history?minutes=1440&streams=1&limit=5000`;
-        const res = await fetch(url, { credentials: 'include' });
+        const url = `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/history?minutes=1440&streams=1&limit=5000`;
+        let res = await fetch(url);
+
         if (!res.ok) return;
 
         const ct = res.headers.get('content-type') || '';
-        if (!ct.includes('application/json')) return;
+        if (!ct.includes('application/json')) {
+          // fallback direct :4000
+          const direct = `${proto}//${host}:4000`;
+          res = await fetch(
+            `${direct.replace(/\/+$/, '')}/events/${id}/history?minutes=1440&streams=1&limit=5000`
+          );
+          if (!res.ok) return;
+        }
 
         const data = await res.json();
         if (aborted) return;
@@ -622,80 +660,32 @@ export default function Dashboard() {
         if (Array.isArray(data.streams)) {
           const grouped = {};
           for (const row of data.streams) {
-            const arr = grouped[row.stream_id] || [];
+            const sid = row.stream_id;
+            const arr = grouped[sid] || [];
             arr.push({ ts: row.ts, current: row.concurrent_viewers });
-            grouped[row.stream_id] = arr;
+            grouped[sid] = arr;
           }
           setStreamsHistory(grouped);
         }
-      } catch {}
+      } catch {
+        // silencieux
+      }
     })();
 
     return () => {
       aborted = true;
     };
-  }, [id, API_BASE]);
+  }, [id, API_BASE, host, proto]);
 
-  // 4) IMPORTANT: hook toujours appelé (fix React #310) + force redraw quand history change
-  useEffect(() => {
-    try {
-      const chart = getChartInstance(totalChartRef);
-      if (chart) chart.update('none');
-    } catch {}
-  }, [history]);
+  /* --------------------------
+     Chart models (memo)
+  --------------------------- */
+  const streamList = event?.streams || [];
 
-  if (!event) {
-    return (
-      <div
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'linear-gradient(135deg, #1e1b4b 0%, #0c2164ff 50%, #db2777 100%)',
-          color: 'white'
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <div
-            style={{
-              width: '60px',
-              height: '60px',
-              border: '3px solid rgba(255,255,255,0.3)',
-              borderTopColor: '#f59e0b',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite',
-              margin: '0 auto 1rem'
-            }}
-          />
-          <div style={{ fontSize: '1.2rem', fontWeight: '500' }}>Chargement...</div>
-        </div>
-      </div>
-    );
-  }
+  // bornes X basées sur history/streamsHistory
+  const xBounds = useMemo(() => {
+    const now = new Date();
 
-  const streamList = event.streams || [];
-
-  // Chart series
-  const MAX_POINTS = 3000;
-  const reduceSeries = (rows) => {
-    if (!Array.isArray(rows)) return [];
-    if (rows.length <= MAX_POINTS) return rows;
-    const stride = Math.ceil(rows.length / MAX_POINTS);
-    const out = [];
-    for (let i = 0; i < rows.length; i += stride) out.push(rows[i]);
-    return out;
-  };
-
-  const series = reduceSeries(history);
-  const seriesPoints = series.map((p) => ({
-    x: new Date(p.ts),
-    y: typeof p.total === 'number' ? p.total : Number(p.total) || 0
-  }));
-
-  const now = new Date();
-
-  const computeEarliestTs = () => {
     let t = Infinity;
 
     if (Array.isArray(history) && history.length) {
@@ -716,98 +706,199 @@ export default function Dashboard() {
     }
 
     if (!isFinite(t)) {
-      if (event?.created_at) return new Date(event.created_at);
-      return new Date(Date.now() - 3 * 60 * 60 * 1000);
+      if (createdAtRef.current) return { xMin: new Date(createdAtRef.current), xMax: now };
+      return { xMin: new Date(Date.now() - 3 * 60 * 60 * 1000), xMax: now };
     }
-    return new Date(t);
-  };
 
-  const xMin = computeEarliestTs();
-  const xMax = now;
+    return { xMin: new Date(t), xMax: now };
+  }, [history, streamsHistory]);
 
-  const totalMinutes = Math.max(1, Math.round((xMax.getTime() - xMin.getTime()) / 60000));
-  const timeUnit = totalMinutes >= 1440 ? 'day' : totalMinutes >= 360 ? 'hour' : 'minute';
+  const timeUnit = useMemo(() => {
+    const totalMinutes = Math.max(
+      1,
+      Math.round((xBounds.xMax.getTime() - xBounds.xMin.getTime()) / 60000)
+    );
+    return totalMinutes >= 1440 ? 'day' : totalMinutes >= 360 ? 'hour' : 'minute';
+  }, [xBounds]);
 
-  const seriesVisiblePoints = seriesPoints.filter((p) => p.x >= xMin && p.x <= xMax);
-  const visibleYs = seriesVisiblePoints.map((p) => (typeof p.y === 'number' ? p.y : Number(p.y) || 0));
-  const maxTotal = visibleYs.length ? Math.max(10, ...visibleYs) : 10;
-  const minTotal = visibleYs.length ? Math.min(...visibleYs) : 0;
+  // total series points (downsample + keep last)
+  const totalVisiblePoints = useMemo(() => {
+    const series = reduceSeries(history);
+    const points = series.map((p) => ({
+      x: new Date(p.ts),
+      y: typeof p.total === 'number' ? p.total : Number(p.total) || 0,
+    }));
+    return points.filter((p) => p.x >= xBounds.xMin && p.x <= xBounds.xMax);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, xBounds.xMin, xBounds.xMax]);
 
-  const data = {
-    datasets: [
-      {
-        id: 'total',
-        label: 'Spectateurs',
-        data: seriesVisiblePoints,
-        borderColor: '#0c2164ff',
-        backgroundColor: 'rgba(139, 92, 246, 0.1)',
-        borderWidth: 3,
-        fill: true,
-        tension: 0.4,
-        pointBackgroundColor: '#0c2164ff',
-        pointBorderColor: '#ffffff',
-        pointBorderWidth: 0,
-        pointRadius: 0,
-        pointHoverRadius: 0
-      }
-    ]
-  };
+  const totalData = useMemo(() => {
+    return {
+      datasets: [
+        {
+          id: 'total',
+          label: 'Spectateurs',
+          data: totalVisiblePoints,
+          borderColor: '#0c2164ff',
+          backgroundColor: 'rgba(139, 92, 246, 0.1)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+        },
+      ],
+    };
+  }, [totalVisiblePoints]);
 
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    parsing: false,
-    normalized: false,
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        titleColor: '#ffffff',
-        bodyColor: '#ffffff',
-        borderColor: '#0c2164ff',
-        borderWidth: 1
+  const totalOptions = useMemo(() => {
+    const ys = totalVisiblePoints.map((p) => (typeof p.y === 'number' ? p.y : Number(p.y) || 0));
+    const maxY = ys.length ? Math.max(10, ...ys) : 10;
+    const minY = ys.length ? Math.min(...ys) : 0;
+
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      parsing: false,
+      normalized: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#ffffff',
+          bodyColor: '#ffffff',
+          borderColor: '#0c2164ff',
+          borderWidth: 1,
+        },
+        decimation: {
+          enabled: true,
+          algorithm: 'lttb',
+          threshold: 500,
+        },
       },
-      decimation: {
-        enabled: true,
-        algorithm: 'lttb',
-        threshold: 500
-      }
-    },
-    scales: {
-      x: {
-        type: 'time',
-        time: { unit: timeUnit },
-        min: xMin,
-        max: xMax,
-        grid: { color: 'rgba(255, 255, 255, 0.1)' },
-        ticks: { color: 'rgba(255, 255, 255, 0.7)', maxTicksLimit: 10 }
+      scales: {
+        x: {
+          type: 'time',
+          time: { unit: timeUnit },
+          min: xBounds.xMin,
+          max: xBounds.xMax,
+          grid: { color: 'rgba(255, 255, 255, 0.1)' },
+          ticks: { color: 'rgba(255, 255, 255, 0.7)', maxTicksLimit: 10 },
+        },
+        y: {
+          beginAtZero: false,
+          min: Math.max(0, Math.floor(minY * 0.95)),
+          max: Math.max(Math.ceil(maxY * 1.05), 11),
+          grid: { color: 'rgba(255, 255, 255, 0.1)' },
+          ticks: { color: 'rgba(255, 255, 255, 0.7)' },
+        },
       },
-      y: {
-        beginAtZero: false,
-        min: Math.max(0, Math.floor(minTotal * 0.95)),
-        max: Math.max(Math.ceil(maxTotal * 1.05), 11),
-        grid: { color: 'rgba(255, 255, 255, 0.1)' },
-        ticks: { color: 'rgba(255, 255, 255, 0.7)' }
-      }
-    },
-    animation: false,
-    elements: { point: { radius: 0 } },
-    interaction: { intersect: false, mode: 'index' },
-    spanGaps: true
+      animation: false,
+      elements: { point: { radius: 0 } },
+      interaction: { intersect: false, mode: 'index' },
+      spanGaps: true,
+    };
+  }, [timeUnit, xBounds, totalVisiblePoints]);
+
+  // Hook sûr: redraw chart quand les points changent (PLACÉ AVANT tout return conditionnel)
+  useEffect(() => {
+    try {
+      const chart = getChartInstance(totalChartRef);
+      if (chart && typeof chart.update === 'function') chart.update('none');
+    } catch {}
+  }, [totalVisiblePoints]);
+
+  /* --------------------------
+     Export helpers
+  --------------------------- */
+  const downloadDataUrl = (filename, dataUrl) => {
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
+  const exportTotalCsvLocal = (filename) => {
+    const header = "Heure,Total de spectateurs de l'events\n";
+    const rows = (Array.isArray(history) ? history : []).map((r) => {
+      const heure = new Date(r.ts).toLocaleTimeString('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+      const total = typeof r.total === 'number' ? r.total : Number(r.total) || 0;
+      return `${heure},${total}`;
+    });
+
+    const csv = header + rows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    URL.revokeObjectURL(url);
+  };
+
+  /* --------------------------
+     Render: loading
+  --------------------------- */
+  if (!event) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background:
+            'linear-gradient(135deg, #1e1b4b 0%, #0c2164ff 50%, #db2777 100%)',
+          color: 'white',
+        }}
+      >
+        <div style={{ textAlign: 'center' }}>
+          <div
+            style={{
+              width: '60px',
+              height: '60px',
+              border: '3px solid rgba(255,255,255,0.3)',
+              borderTopColor: '#f59e0b',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              margin: '0 auto 1rem',
+            }}
+          />
+          <div style={{ fontSize: '1.2rem', fontWeight: '500' }}>
+            Chargement...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* --------------------------
+     Render: main
+  --------------------------- */
   return (
     <div
       style={{
         minHeight: '100vh',
-        background: 'linear-gradient(135deg, #1e1b4b 0%, #0c2164ff 50%, #db2777 100%)',
+        background:
+          'linear-gradient(135deg, #1e1b4b 0%, #0c2164ff 50%, #db2777 100%)',
         color: 'white',
-        position: 'relative'
+        position: 'relative',
       }}
     >
       <ParticleSystem />
 
       <div style={{ position: 'relative', zIndex: 10 }}>
+        {/* Back */}
         <div style={{ padding: '1rem 2rem' }}>
           <Link
             to={`/admin/event/${id}`}
@@ -824,30 +915,30 @@ export default function Dashboard() {
               textDecoration: 'none',
               fontWeight: '600',
               transition: 'all 0.3s ease',
-              boxShadow: '0 4px 15px rgba(0,0,0,0.2)'
+              boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
             }}
             onMouseEnter={(e) => {
-              const el = e.currentTarget;
-              el.style.transform = 'translateY(-2px)';
-              el.style.boxShadow = '0 8px 25px rgba(139, 92, 246, 0.3)';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow =
+                '0 8px 25px rgba(139, 92, 246, 0.3)';
             }}
             onMouseLeave={(e) => {
-              const el = e.currentTarget;
-              el.style.transform = 'translateY(0)';
-              el.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
             }}
           >
             ← Retour à l&apos;évènement
           </Link>
         </div>
 
+        {/* Header */}
         <div
           style={{
             background: 'rgba(255, 255, 255, 0.1)',
             backdropFilter: 'blur(10px)',
             borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
             padding: '2rem 1rem',
-            textAlign: 'center'
+            textAlign: 'center',
           }}
         >
           <div style={{ marginBottom: '1rem' }}>
@@ -862,7 +953,7 @@ export default function Dashboard() {
               background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text'
+              backgroundClip: 'text',
             }}
           >
             📊 Dashboard Live
@@ -870,14 +961,15 @@ export default function Dashboard() {
 
           <div
             style={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%)',
+              background:
+                'linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%)',
               backdropFilter: 'blur(20px)',
               border: '1px solid rgba(255,255,255,0.3)',
               borderRadius: '20px',
               padding: '2rem',
               maxWidth: '400px',
               margin: '0 auto',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
             }}
           >
             <div
@@ -886,7 +978,7 @@ export default function Dashboard() {
                 color: 'rgba(255,255,255,0.8)',
                 marginBottom: '0.5rem',
                 textTransform: 'uppercase',
-                letterSpacing: '1px'
+                letterSpacing: '1px',
               }}
             >
               Total Spectateurs
@@ -900,38 +992,36 @@ export default function Dashboard() {
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
                 backgroundClip: 'text',
-                lineHeight: '1'
+                lineHeight: '1',
               }}
             >
-              {Number(totalViewers || 0).toLocaleString()}
+              {totalViewers?.toLocaleString() || 0}
             </div>
 
-            {Number(totalViewers || 0) !== Number(previousTotal || 0) && (
+            {totalViewers > previousTotal && (
               <div
                 style={{
-                  color: Number(totalViewers || 0) >= Number(previousTotal || 0) ? '#10b981' : '#ef4444',
+                  color: '#10b981',
                   fontSize: '0.9rem',
                   marginTop: '0.5rem',
-                  animation: 'bounce 1s infinite'
+                  animation: 'bounce 1s infinite',
                 }}
               >
-                {Number(totalViewers || 0) >= Number(previousTotal || 0)
-                  ? `📈 +${(Number(totalViewers || 0) - Number(previousTotal || 0)).toLocaleString()}`
-                  : `📉 ${(
-                      Number(totalViewers || 0) - Number(previousTotal || 0)
-                    ).toLocaleString()}`}
+                📈 +{(totalViewers - previousTotal).toLocaleString()}
               </div>
             )}
           </div>
         </div>
 
+        {/* Content */}
         <div style={{ padding: '2rem 1rem' }}>
+          {/* Streams grid */}
           <div
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
               gap: '1rem',
-              marginBottom: '2rem'
+              marginBottom: '2rem',
             }}
           >
             {streamList.map((s) => {
@@ -940,21 +1030,23 @@ export default function Dashboard() {
                 <DynamicStreamCard
                   key={s.id}
                   label={s.label}
-                  current={typeof st?.current === 'number' ? st.current : Number(st?.current) || 0}
-                  online={Boolean(st?.online)}
+                  current={st?.current ?? 0}
+                  online={st?.online ?? false}
                 />
               );
             })}
           </div>
 
+          {/* Total chart + export */}
           <div
             style={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
+              background:
+                'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
               backdropFilter: 'blur(10px)',
               border: '1px solid rgba(255,255,255,0.2)',
               borderRadius: '20px',
               padding: '2rem',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
             }}
           >
             <h3
@@ -965,15 +1057,20 @@ export default function Dashboard() {
                 background: 'linear-gradient(45deg, #0c2164ff, #3b82f6)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text'
+                backgroundClip: 'text',
               }}
             >
               📈 Évolution Temps Réel
             </h3>
 
             <div style={{ height: '300px', position: 'relative' }}>
-              <Line ref={totalChartRef} data={data} options={options} datasetIdKey="id" />
-              {seriesVisiblePoints.length === 0 && (
+              <Line
+                ref={totalChartRef}
+                data={totalData}
+                options={totalOptions}
+                datasetIdKey="id"
+              />
+              {totalVisiblePoints.length === 0 && (
                 <div
                   style={{
                     position: 'absolute',
@@ -983,8 +1080,9 @@ export default function Dashboard() {
                     justifyContent: 'center',
                     color: 'rgba(255,255,255,0.9)',
                     fontWeight: 600,
-                    background: 'linear-gradient(135deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.05) 100%)',
-                    borderRadius: '16px'
+                    background:
+                      'linear-gradient(135deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.05) 100%)',
+                    borderRadius: '16px',
                   }}
                 >
                   Aucune donnée disponible sur la période.
@@ -992,7 +1090,15 @@ export default function Dashboard() {
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: '0.5rem',
+                marginTop: '1rem',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+              }}
+            >
               <button
                 onClick={() => {
                   const chart = getChartInstance(totalChartRef);
@@ -1004,7 +1110,7 @@ export default function Dashboard() {
                   border: 'none',
                   padding: '0.5rem 1rem',
                   borderRadius: '10px',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
                 }}
               >
                 Exporter PNG
@@ -1018,7 +1124,7 @@ export default function Dashboard() {
                   border: 'none',
                   padding: '0.5rem 1rem',
                   borderRadius: '10px',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
                 }}
               >
                 Exporter CSV (Heure, Total)
@@ -1031,32 +1137,35 @@ export default function Dashboard() {
                     setJobProgress(0);
                     setJobId(null);
 
-                    const payload = event?.created_at
-                      ? { type: 'total', from: event.created_at, to: new Date().toISOString() }
+                    const payload = createdAtRef.current
+                      ? { type: 'total', from: createdAtRef.current, to: new Date().toISOString() }
                       : { type: 'total', minutes: 180 };
 
-                    const res = await fetch(`${API_BASE}/events/${id}/export`, {
+                    const res = await fetch(`${String(API_BASE).replace(/\/+$/, '')}/events/${id}/export`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      credentials: 'include',
-                      body: JSON.stringify(payload)
+                      body: JSON.stringify(payload),
                     });
 
-                    const json = await res.json();
-                    if (!json.jobId) throw new Error('jobId manquant');
+                    const data = await res.json();
+                    if (!data.jobId) throw new Error('jobId manquant');
 
-                    setJobId(json.jobId);
+                    setJobId(data.jobId);
 
                     const poll = async () => {
-                      const sres = await fetch(`${API_BASE}/exports/${json.jobId}/status`, { credentials: 'include' });
+                      const sres = await fetch(
+                        `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/status`
+                      );
                       const sdata = await sres.json();
 
                       if (sdata.status === 'done') {
                         setJobExporting(false);
-                        const url = `${API_BASE}/exports/${json.jobId}/download`;
+                        const url = `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/download`;
                         const a = document.createElement('a');
                         a.href = url;
-                        a.download = event?.created_at ? `event_${id}_history_all.csv` : `event_${id}_history_180m.csv`;
+                        a.download = createdAtRef.current
+                          ? `event_${id}_history_all.csv`
+                          : `event_${id}_history_180m.csv`;
                         document.body.appendChild(a);
                         a.click();
                         document.body.removeChild(a);
@@ -1083,7 +1192,7 @@ export default function Dashboard() {
                   border: 'none',
                   padding: '0.5rem 1rem',
                   borderRadius: '10px',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
                 }}
               >
                 {jobExporting ? `Job… ${jobProgress}` : 'Exporter CSV (async)'}
@@ -1091,6 +1200,7 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/* Toggle stream charts */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
             <button
               onClick={() => setShowStreamCharts((v) => !v)}
@@ -1102,23 +1212,25 @@ export default function Dashboard() {
                 border: 'none',
                 padding: '0.5rem 1rem',
                 borderRadius: '10px',
-                cursor: 'pointer'
+                cursor: 'pointer',
               }}
             >
               {showStreamCharts ? 'Masquer les graphiques par stream' : 'Afficher les graphiques par stream'}
             </button>
           </div>
 
-          {showStreamCharts && (event.streams || []).length > 0 && (
+          {/* Stream charts */}
+          {showStreamCharts && streamList.length > 0 && (
             <div
               style={{
                 marginTop: '2rem',
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
+                background:
+                  'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
                 backdropFilter: 'blur(10px)',
                 border: '1px solid rgba(255,255,255,0.2)',
                 borderRadius: '20px',
                 padding: '2rem',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+                boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
               }}
             >
               <h3
@@ -1129,7 +1241,7 @@ export default function Dashboard() {
                   background: 'linear-gradient(45deg, #0c2164ff, #3b82f6)',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text'
+                  backgroundClip: 'text',
                 }}
               >
                 📈 Par stream
@@ -1139,14 +1251,14 @@ export default function Dashboard() {
                 style={{
                   display: 'grid',
                   gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-                  gap: '1rem'
+                  gap: '1rem',
                 }}
               >
-                {(event.streams || []).map((stream) => {
+                {streamList.map((stream) => {
                   const rows = reduceSeries(streamsHistory[stream.id] || []);
                   const points = rows.map((r) => ({
                     x: new Date(r.ts),
-                    y: typeof r.current === 'number' ? r.current : Number(r.current) || 0
+                    y: typeof r.current === 'number' ? r.current : Number(r.current) || 0,
                   }));
 
                   const st = event.state?.streams?.[stream.id];
@@ -1160,9 +1272,22 @@ export default function Dashboard() {
                         backgroundColor: 'rgba(139, 92, 246, 0.1)',
                         borderWidth: 2,
                         tension: 0.3,
-                        pointRadius: 0
-                      }
-                    ]
+                        pointRadius: 0,
+                      },
+                    ],
+                  };
+
+                  // options stream: on garde le même X live, mais on laisse Y auto
+                  const so = {
+                    ...totalOptions,
+                    scales: {
+                      ...totalOptions.scales,
+                      y: {
+                        beginAtZero: true,
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                        ticks: { color: 'rgba(255, 255, 255, 0.7)' },
+                      },
+                    },
                   };
 
                   return (
@@ -1172,7 +1297,7 @@ export default function Dashboard() {
                         background: 'rgba(255,255,255,0.05)',
                         border: '1px solid rgba(255,255,255,0.2)',
                         borderRadius: '12px',
-                        padding: '1rem'
+                        padding: '1rem',
                       }}
                     >
                       <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: 'white' }}>
@@ -1181,11 +1306,9 @@ export default function Dashboard() {
 
                       <div style={{ height: '200px' }}>
                         <Line
-                          ref={(el) => {
-                            streamChartRefs.current[stream.id] = el;
-                          }}
+                          ref={(el) => (streamChartRefs.current[stream.id] = el)}
                           data={sd}
-                          options={{ ...options, maintainAspectRatio: false }}
+                          options={so}
                           datasetIdKey="id"
                         />
                       </div>
@@ -1193,8 +1316,7 @@ export default function Dashboard() {
                       <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                         <button
                           onClick={() => {
-                            const refObj = { current: streamChartRefs.current[stream.id] };
-                            const chart = getChartInstance(refObj);
+                            const chart = getChartInstance({ current: streamChartRefs.current[stream.id] });
                             if (chart) {
                               downloadDataUrl(
                                 `${stream.label.replace(/\s+/g, '_')}_viewers_${id}.png`,
@@ -1208,7 +1330,7 @@ export default function Dashboard() {
                             border: 'none',
                             padding: '0.4rem 0.8rem',
                             borderRadius: '8px',
-                            cursor: 'pointer'
+                            cursor: 'pointer',
                           }}
                         >
                           PNG
@@ -1217,15 +1339,15 @@ export default function Dashboard() {
                         <button
                           onClick={() => {
                             const nowIso = new Date().toISOString();
-                            const url = event?.created_at
-                              ? `${API_BASE}/events/${id}/streams/${stream.id}/history.csv?from=${encodeURIComponent(
-                                  event.created_at
+                            const url = createdAtRef.current
+                              ? `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/streams/${stream.id}/history.csv?from=${encodeURIComponent(
+                                  createdAtRef.current
                                 )}&to=${encodeURIComponent(nowIso)}`
-                              : `${API_BASE}/events/${id}/streams/${stream.id}/history.csv?minutes=180`;
+                              : `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/streams/${stream.id}/history.csv?minutes=180`;
 
                             const a = document.createElement('a');
                             a.href = url;
-                            a.download = event?.created_at
+                            a.download = createdAtRef.current
                               ? `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_all.csv`
                               : `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_180m.csv`;
                             document.body.appendChild(a);
@@ -1238,7 +1360,7 @@ export default function Dashboard() {
                             border: 'none',
                             padding: '0.4rem 0.8rem',
                             borderRadius: '8px',
-                            cursor: 'pointer'
+                            cursor: 'pointer',
                           }}
                         >
                           CSV
@@ -1247,29 +1369,38 @@ export default function Dashboard() {
                         <button
                           onClick={async () => {
                             try {
-                              const payload = event?.created_at
-                                ? { type: 'stream', sid: stream.id, from: event.created_at, to: new Date().toISOString() }
+                              const payload = createdAtRef.current
+                                ? {
+                                    type: 'stream',
+                                    sid: stream.id,
+                                    from: createdAtRef.current,
+                                    to: new Date().toISOString(),
+                                  }
                                 : { type: 'stream', sid: stream.id, minutes: 180 };
 
-                              const res = await fetch(`${API_BASE}/events/${id}/export`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                credentials: 'include',
-                                body: JSON.stringify(payload)
-                              });
+                              const res = await fetch(
+                                `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/export`,
+                                {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify(payload),
+                                }
+                              );
 
-                              const json = await res.json();
-                              if (!json.jobId) return;
+                              const data = await res.json();
+                              if (!data.jobId) return;
 
                               const poll = async () => {
-                                const sres = await fetch(`${API_BASE}/exports/${json.jobId}/status`, { credentials: 'include' });
+                                const sres = await fetch(
+                                  `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/status`
+                                );
                                 const sdata = await sres.json();
 
                                 if (sdata.status === 'done') {
-                                  const url = `${API_BASE}/exports/${json.jobId}/download`;
+                                  const url = `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/download`;
                                   const a = document.createElement('a');
                                   a.href = url;
-                                  a.download = event?.created_at
+                                  a.download = createdAtRef.current
                                     ? `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_all.csv`
                                     : `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_180m.csv`;
                                   document.body.appendChild(a);
@@ -1291,7 +1422,7 @@ export default function Dashboard() {
                             border: 'none',
                             padding: '0.4rem 0.8rem',
                             borderRadius: '8px',
-                            cursor: 'pointer'
+                            cursor: 'pointer',
                           }}
                         >
                           Job
@@ -1306,30 +1437,22 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* CSS anims */}
       <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
         @keyframes bounce {
-          0%, 20%, 53%, 80%, 100% { transform: translateY(0); }
-          40%, 43% { transform: translateY(-8px); }
-          70% { transform: translateY(-4px); }
-          90% { transform: translateY(-2px); }
+          0%,20%,53%,80%,100%{transform:translateY(0)}
+          40%,43%{transform:translateY(-8px)}
+          70%{transform:translateY(-4px)}
+          90%{transform:translateY(-2px)}
         }
         @keyframes glow {
-          0% { text-shadow: 0 0 5px rgba(19, 48, 110, 0.8); }
-          50% { text-shadow: 0 0 20px rgba(19, 48, 110, 0.8); }
-          100% { text-shadow: 0 0 5px rgba(19, 48, 110, 0.5); }
+          0%{text-shadow:0 0 5px rgba(19,48,110,.8)}
+          50%{text-shadow:0 0 20px rgba(19,48,110,.8)}
+          100%{text-shadow:0 0 5px rgba(19,48,110,.5)}
         }
-        @keyframes shine {
-          0% { left: -100%; }
-          100% { left: 100%; }
-        }
+        @keyframes shine { 0%{left:-100%} 100%{left:100%} }
       `}</style>
     </div>
   );
