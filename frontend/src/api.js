@@ -2,6 +2,8 @@ const HOST = typeof window !== 'undefined' ? window.location.hostname : 'localho
 const PROTO = typeof window !== 'undefined' ? window.location.protocol : 'http:';
 const DEFAULT_API = `${PROTO}//${HOST}:4000`;
 const API = import.meta.env.VITE_API_URL || DEFAULT_API;
+const DEV_PORTS = new Set(['3000', '3001', '3019']);
+const IS_DEV = typeof window !== 'undefined' && DEV_PORTS.has(window.location.port);
 
 function joinUrl(base, path) {
   const b = (base || '').replace(/\/+$/, '');
@@ -16,9 +18,9 @@ async function fetchWithFallback(path, options) {
   const primaryUrl = joinUrl(API, path);
   let res = await fetch(primaryUrl, options);
   const ct = res.headers.get('content-type') || '';
-  // Si on obtient du HTML avec une base relative, on retente vers l'API directe (port 4000)
+  // En DEV uniquement: si base relative et réponse HTML (frontend), retenter vers :4000
   const looksHtml = ct.includes('text/html');
-  if (API_IS_RELATIVE && looksHtml) {
+  if (IS_DEV && API_IS_RELATIVE && looksHtml) {
     const fallbackUrl = joinUrl(DEFAULT_API, path);
     try {
       const res2 = await fetch(fallbackUrl, options);
