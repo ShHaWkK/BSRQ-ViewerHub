@@ -1,23 +1,15 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getEvent, addStream, removeStream, pauseEvent, startEvent, reactivateStream, updateStream, pauseStream, startStream, toggleStreamFavorite, getYoutubeTitle } from '../api.js';
+import { getEvent, addStream, removeStream, pauseEvent, startEvent, reactivateStream, updateStream, pauseStream, startStream, toggleStreamFavorite } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
-
-
-/**
- * Composant pour afficher des particules flottantes en arrière-plan
- * param {Object} props
- * @returns 
- */
+// Composant de particules flottantes
 const FloatingParticles = () => {
   const containerRef = useRef(null);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReduced) return;
 
     const createParticle = () => {
       const particle = document.createElement('div');
@@ -46,16 +38,8 @@ const FloatingParticles = () => {
       }, 15000);
     };
 
-    let interval = setInterval(createParticle, 1600);
-    const onVis = () => {
-      clearInterval(interval);
-      interval = document.hidden ? null : setInterval(createParticle, 1600);
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      if (interval) clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVis);
-    };
+    const interval = setInterval(createParticle, 800);
+    return () => clearInterval(interval);
   }, []);
 
   return (
@@ -75,46 +59,22 @@ const FloatingParticles = () => {
   );
 };
 
-/*
-  * Composant pour afficher un flux individuel avec ses actions
-  * @param {Object} props
-  * @param {Object} props.stream - Données du flux
-  * @param {Function} props.onDelete - Fonction de suppression du flux
-  * @param {Function} props.onReactivate - Fonction de réactivation du flux
-  * @param {Function} props.onUpdate - Fonction de mise à jour du flux
-  * @param {Function} props.onPauseStream - Fonction de mise en pause du flux
-  * @param {Function} props.onStartStream - Fonction de démarrage du flux
-  * @param {Function} props.onToggleFavorite - Fonction de basculement du favori
-  * @param {number} props.index - Index du flux pour l'animation
-  * @returns
-*/
-
-
+// Composant Stream Item animé
 const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, onStartStream, onToggleFavorite, index }) => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [actionBusy, setActionBusy] = useState(false);
-  const [actionError, setActionError] = useState('');
-  const [saveError, setSaveError] = useState(null);
   const [editForm, setEditForm] = useState({
     label: stream.label || '',
+    customTitle: stream.custom_title || '',
     customInterval: stream.custom_interval_sec || ''
   });
 
-  const [deleteError, setDeleteError] = useState(null);
   const handleDelete = async () => {
-    setDeleteError(null);
     setIsDeleting(true);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await onDelete(stream.id);
-    } catch (e) {
-      console.error('Suppression du flux échouée:', e);
-      setDeleteError(e.message || 'Échec de la suppression du flux');
-      setIsDeleting(false);
-    }
+    setTimeout(() => {
+      onDelete(stream.id);
+    }, 500);
   };
 
   const handleReactivate = async () => {
@@ -122,29 +82,11 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
   };
 
   const handlePauseStream = async () => {
-    setActionError('');
-    setActionBusy(true);
-    try {
-      await onPauseStream(stream.id);
-    } catch (e) {
-      console.error('Pause stream failed:', e);
-      setActionError('Échec de la pause du flux.');
-    } finally {
-      setActionBusy(false);
-    }
+    await onPauseStream(stream.id);
   };
 
   const handleStartStream = async () => {
-    setActionError('');
-    setActionBusy(true);
-    try {
-      await onStartStream(stream.id);
-    } catch (e) {
-      console.error('Start stream failed:', e);
-      setActionError('Échec du démarrage du flux.');
-    } finally {
-      setActionBusy(false);
-    }
+    await onStartStream(stream.id);
   };
 
   const handleToggleFavorite = async () => {
@@ -156,33 +98,18 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
   };
 
   const handleSaveEdit = async () => {
-    setSaveError(null);
-    setIsSaving(true);
     try {
-      const nextLabel = (editForm.label || '').trim();
-      if (!nextLabel) {
-        throw new Error('Le label est requis');
-      }
-      const rawInterval = editForm.customInterval;
-      const intervalNum = rawInterval === '' || rawInterval === null || rawInterval === undefined
-        ? undefined
-        : parseInt(rawInterval, 10);
-      const payload = intervalNum && !isNaN(intervalNum)
-        ? { label: nextLabel, customInterval: intervalNum }
-        : { label: nextLabel };
-      await onUpdate(stream.id, payload);
+      await onUpdate(stream.id, editForm);
       setIsEditing(false);
     } catch (error) {
       console.error('Erreur lors de la mise à jour:', error);
-      setSaveError('Échec de la sauvegarde. Réessayez.');
-    } finally {
-      setIsSaving(false);
     }
   };
 
   const handleCancelEdit = () => {
     setEditForm({
       label: stream.label || '',
+      customTitle: stream.custom_title || '',
       customInterval: stream.custom_interval_sec || ''
     });
     setIsEditing(false);
@@ -253,7 +180,22 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                   outline: 'none'
                 }}
               />
-
+              <input
+                type="text"
+                placeholder="Titre personnalisé (optionnel)"
+                value={editForm.customTitle}
+                onChange={e => setEditForm({ ...editForm, customTitle: e.target.value })}
+                style={{
+                  padding: '0.5rem',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  background: 'rgba(255,255,255,0.1)',
+                  color: 'white',
+                  width: '100%',
+                  marginBottom: '0.5rem',
+                  outline: 'none'
+                }}
+              />
               <input
                 type="number"
                 placeholder="Intervalle (sec, optionnel)"
@@ -279,12 +221,11 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                 style={{
                   background: 'none',
                   border: 'none',
-                  fontSize: stream.is_favorite ? '2.5rem' : '1.2rem',
+                  fontSize: '2rem',
                   cursor: 'pointer',
                   transition: 'all 0.3s ease',
-                  transform: stream.is_favorite ? 'scale(1.3)' : 'scale(0.7)',
-                  filter: stream.is_favorite ? 'drop-shadow(0 0 15px #fbbf24)' : 'none',
-                  opacity: stream.is_favorite ? 1 : 0.5
+                  transform: stream.is_favorite ? 'scale(1.2)' : 'scale(1)',
+                  filter: stream.is_favorite ? 'drop-shadow(0 0 10px #fbbf24)' : 'none'
                 }}
                 title={stream.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
               >
@@ -300,7 +241,7 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
                 backgroundClip: 'text'
-              }}>📺 {stream.label}</h3>
+              }}>📺 {stream.custom_title || stream.label}</h3>
               {stream.custom_interval_sec && (
                 <span style={{
                   fontSize: '0.8rem',
@@ -316,7 +257,6 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
               {stream.is_paused ? (
                 <button
                   onClick={handleStartStream}
-                  disabled={actionBusy}
                   style={{
                     background: 'linear-gradient(45deg, #10b981, #059669)',
                     color: 'white',
@@ -325,7 +265,7 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                     padding: '0.3rem 0.6rem',
                     fontSize: '0.8rem',
                     fontWeight: '600',
-                    cursor: actionBusy ? 'not-allowed' : 'pointer',
+                    cursor: 'pointer',
                     transition: 'all 0.3s ease'
                   }}
                   title="Démarrer ce flux"
@@ -335,7 +275,6 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
               ) : (
                 <button
                   onClick={handlePauseStream}
-                  disabled={actionBusy}
                   style={{
                     background: 'linear-gradient(45deg, #f59e0b, #d97706)',
                     color: 'white',
@@ -344,18 +283,15 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                     padding: '0.3rem 0.6rem',
                     fontSize: '0.8rem',
                     fontWeight: '600',
-                    cursor: actionBusy ? 'not-allowed' : 'pointer',
+                    cursor: 'pointer',
                     transition: 'all 0.3s ease'
                   }}
                   title="Mettre en pause ce flux"
                 >
-                  {actionBusy ? '⏳...' : '⏸️ Pause'}
+                  ⏸️ Pause
                 </button>
               )}
             </div>
-            {actionError && (
-              <div style={{ color: '#fecaca', marginTop: '0.25rem', fontSize: '0.8rem' }}>{actionError}</div>
-            )}
           </div>
           <p style={{ 
             margin: 0, 
@@ -407,7 +343,6 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
             <>
               <button
                 onClick={handleSaveEdit}
-                disabled={isSaving}
                 style={{
                   background: 'linear-gradient(45deg, #10b981, #059669)',
                   color: 'white',
@@ -416,15 +351,12 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
                   padding: '0.5rem 1rem',
                   fontSize: '0.8rem',
                   fontWeight: '600',
-                  cursor: isSaving ? 'not-allowed' : 'pointer',
+                  cursor: 'pointer',
                   transition: 'all 0.3s ease'
                 }}
               >
-                {isSaving ? '⏳ Sauvegarde...' : '✅ Sauvegarder'}
+                ✅ Sauvegarder
               </button>
-              {saveError && (
-                <div style={{ color: '#fecaca', marginTop: '0.5rem' }}>{saveError}</div>
-              )}
               <button
                 onClick={handleCancelEdit}
                 style={{
@@ -493,9 +425,6 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
         >
           {isDeleting ? '🗑️ Suppression...' : '❌ Supprimer'}
         </button>
-        {deleteError && (
-          <div style={{ color: '#ef4444', marginTop: '0.5rem', fontSize: '0.85rem' }}>{deleteError}</div>
-        )}
       </div>
     </div>
   );
@@ -504,16 +433,11 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
 export default function EventDetail() {
   const { id } = useParams();
   const [event, setEvent] = useState(null);
-  const [form, setForm] = useState({ label: '', urlOrId: '', customInterval: '' });
-  const [autoTitle, setAutoTitle] = useState('');
-  const [isLoadingTitle, setIsLoadingTitle] = useState(false);
+  const [form, setForm] = useState({ label: '', urlOrId: '', customTitle: '', customInterval: '' });
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState(null);
   const [isPaused, setIsPaused] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
-  const titleAbortRef = useRef(null);
-  const titleDebounceRef = useRef(null);
 
   async function refresh() {
     const ev = await getEvent(id);
@@ -526,79 +450,16 @@ export default function EventDetail() {
     refresh(); 
   }, [id]);
 
-  const fetchVideoTitle = async (urlOrId) => {
-    if (!urlOrId.trim()) return;
-    
-    setIsLoadingTitle(true);
-    try {
-      // Extraire l'ID de la vidéo depuis l'URL ou utiliser directement l'ID
-      let videoId = urlOrId;
-      if (urlOrId.includes('youtube.com') || urlOrId.includes('youtu.be')) {
-        const url = new URL(urlOrId);
-        videoId = url.searchParams.get('v') || url.pathname.split('/').pop();
-      }
-      // Appel à l'API backend pour récupérer le titre via la couche API (avec repli)
-      // Annule toute requête précédente
-      if (titleAbortRef.current) titleAbortRef.current.abort();
-      const controller = new AbortController();
-      titleAbortRef.current = controller;
-      const data = await getYoutubeTitle(videoId);
-      if (data && typeof data.title === 'string') {
-        const title = data.title;
-        setAutoTitle(title);
-        // Remplir automatiquement le label avec le titre de la vidéo
-        setForm(prev => ({ ...prev, label: title }));
-      } else {
-        console.error('Réponse inattendue lors de la récupération du titre:', data);
-      }
-    } catch (error) {
-      if (error.name !== 'AbortError') {
-        console.error('Erreur lors de la récupération du titre:', error);
-      }
-    }
-    setIsLoadingTitle(false);
-  };
-
-  const debouncedFetchVideoTitle = (value) => {
-    if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current);
-    titleDebounceRef.current = setTimeout(() => {
-      fetchVideoTitle(value);
-    }, 400);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (titleAbortRef.current) titleAbortRef.current.abort();
-      if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current);
-    };
-  }, []);
-
   const submit = async e => {
     e.preventDefault();
     setIsSubmitting(true);
-    setSubmitError(null);
     
     try {
-      // Validation basique de l'ID YouTube pour meilleure UX
-      const isId = /^[a-zA-Z0-9_-]{11}$/;
-      let videoId = form.urlOrId;
-      if (form.urlOrId.includes('youtube.com') || form.urlOrId.includes('youtu.be')) {
-        const url = new URL(form.urlOrId);
-        videoId = url.searchParams.get('v') || url.pathname.split('/').pop();
-      }
-      if (!videoId || !isId.test(videoId)) {
-        setSubmitError('ID/URL YouTube invalide. Vérifiez la valeur saisie.');
-        setIsSubmitting(false);
-        return;
-      }
-
       await addStream(id, form);
-      setForm({ label: '', urlOrId: '', customInterval: '' });
-      setAutoTitle('');
+      setForm({ label: '', urlOrId: '', customTitle: '', customInterval: '' });
       await refresh();
-      setIsSubmitting(false);
+      setTimeout(() => setIsSubmitting(false), 1000);
     } catch (error) {
-      setSubmitError(error.message || 'Échec ajout du flux. Réessayez.');
       setIsSubmitting(false);
     }
   };
@@ -921,62 +782,46 @@ export default function EventDetail() {
           </div>
 
           <div style={{ marginBottom: '1rem' }}>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'center' }}>
-              <input
-                type="text"
-                placeholder="URL ou ID YouTube"
-                value={form.urlOrId}
-                onChange={e => {
-                  const newValue = e.target.value;
-                  setForm({ ...form, urlOrId: newValue });
-                  // Déclencher automatiquement la récupération du titre si l'URL semble valide
-                  if (newValue.includes('youtube.com') || newValue.includes('youtu.be') || (newValue.length === 11 && !newValue.includes(' '))) {
-                    debouncedFetchVideoTitle(newValue);
-                  }
-                }}
-                style={{
-                  padding: '0.75rem',
-                  borderRadius: '12px',
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  background: 'rgba(255,255,255,0.1)',
-                  color: 'white',
-                  width: '100%',
-                  maxWidth: '300px',
-                  outline: 'none',
-                  transition: 'all 0.3s ease',
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => fetchVideoTitle(form.urlOrId)}
-                disabled={!form.urlOrId.trim() || isLoadingTitle}
-                style={{
-                  padding: '0.75rem 1rem',
-                  borderRadius: '12px',
-                  border: 'none',
-                  background: isLoadingTitle ? 'linear-gradient(45deg, #6b7280, #9ca3af)' : 'linear-gradient(45deg, #3b82f6, #1d4ed8)',
-                  color: 'white',
-                  fontWeight: '600',
-                  cursor: (!form.urlOrId.trim() || isLoadingTitle) ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.3s ease',
-                  fontSize: '0.9rem'
-                }}
-              >
-                {isLoadingTitle ? '⏳' : '🔍 Titre'}
-              </button>
-            </div>
+            <input
+              type="text"
+              placeholder="URL ou ID"
+              value={form.urlOrId}
+              onChange={e => setForm({ ...form, urlOrId: e.target.value })}
+              style={{
+                padding: '0.75rem',
+                borderRadius: '12px',
+                border: '1px solid rgba(255,255,255,0.2)',
+                background: 'rgba(255,255,255,0.1)',
+                color: 'white',
+                width: '100%',
+                maxWidth: '400px',
+                margin: '0 auto',
+                outline: 'none',
+                transition: 'all 0.3s ease',
+              }}
+            />
           </div>
 
-          {autoTitle && (
-            <div style={{
-              marginBottom: '1rem',
-              textAlign: 'center',
-              fontSize: '0.9rem',
-              color: 'rgba(255,255,255,0.7)'
-            }}>
-              📺 Titre détecté et ajouté au label: <span style={{ fontStyle: 'italic', color: 'white' }}>{autoTitle}</span>
-            </div>
-          )}
+          <div style={{ marginBottom: '1rem' }}>
+            <input
+              type="text"
+              placeholder="Titre personnalisé (optionnel)"
+              value={form.customTitle}
+              onChange={e => setForm({ ...form, customTitle: e.target.value })}
+              style={{
+                padding: '0.75rem',
+                borderRadius: '12px',
+                border: '1px solid rgba(255,255,255,0.2)',
+                background: 'rgba(255,255,255,0.1)',
+                color: 'white',
+                width: '100%',
+                maxWidth: '400px',
+                margin: '0 auto',
+                outline: 'none',
+                transition: 'all 0.3s ease',
+              }}
+            />
+          </div>
 
           <div style={{ marginBottom: '1rem' }}>
             <input
@@ -1017,11 +862,6 @@ export default function EventDetail() {
           >
             {isSubmitting ? '⏳ En cours...' : '➕ Ajouter'}
           </button>
-          {submitError && (
-            <div style={{ marginTop: '0.75rem', color: '#fecaca', fontWeight: '600' }}>
-              {submitError}
-            </div>
-          )}
         </form>
 
         {/* Liste des flux */}

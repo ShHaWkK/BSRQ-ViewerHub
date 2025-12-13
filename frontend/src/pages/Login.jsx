@@ -1,15 +1,31 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
-export default function Login() {
+export default function Login({ forceAud, forceRedirect }) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const audParam = (params.get('aud') || 'admin').toLowerCase();
+  const audParam = ((forceAud || params.get('aud') || 'client')).toLowerCase();
   const defaultRedirect = audParam === 'client' ? '/events' : '/admin';
-  const redirectParam = params.get('redirect') || defaultRedirect;
+  const redirectParam = forceRedirect || params.get('redirect') || defaultRedirect;
+
+  // Masquer le login admin aux sessions client
+  useEffect(() => {
+    let mounted = true;
+    if (audParam === 'admin') {
+      fetch('/api/auth/check?aud=client', { credentials: 'same-origin' })
+        .then(res => {
+          if (!mounted) return;
+          if (res.ok) {
+            navigate('/events', { replace: true });
+          }
+        })
+        .catch(() => {});
+    }
+    return () => { mounted = false; };
+  }, [audParam, navigate]);
 
   useEffect(() => {
     const token = params.get('token');
@@ -50,8 +66,8 @@ export default function Login() {
         let target = defaultRedirect;
         try {
           const data = await res.json();
-          if (data?.aud === 'client') target = params.get('redirect') || '/events';
-          else target = params.get('redirect') || '/admin';
+          if (data?.aud === 'client') target = forceRedirect || params.get('redirect') || '/events';
+          else target = forceRedirect || params.get('redirect') || '/admin';
         } catch {
           target = redirectParam;
         }

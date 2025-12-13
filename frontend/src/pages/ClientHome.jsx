@@ -83,7 +83,7 @@ export default function ClientHome() {
               </div>
               <div className="card-actions">
                 <Link to={`/event/${ev.id}/live`} className="btn btn--brand-gb">Ouvrir le viewer</Link>
-                <Link to={`/event/${ev.id}/dashboard`} className="btn btn--brand-bp">Dashboard (admin)</Link>
+                <Link to={`/event/${ev.id}/stats`} className="btn btn--brand-bp">Dashboard</Link>
               </div>
             </div>
           ))}

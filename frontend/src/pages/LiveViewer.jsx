@@ -343,7 +343,7 @@ export default function LiveViewer() {
         zIndex: 10 
       }}>
         <Link
-          to={`/admin/event/${event.id}`}
+          to={`/event/${event.id}/stats`}
           style={{
             display: 'inline-flex',
             alignItems: 'center',

@@ -93,8 +93,9 @@ const AnimatedBackground = () => {
 };
 
 // Composant Event Card animé
-const EventCard = ({ event, index, onEdit, onDelete, onCopyMagic }) => {
+const EventCard = ({ event, index, onEdit, onDelete, onCopyMagic, onCopyMagicClient }) => {
   const [isHovered, setIsHovered] = useState(false);
+  const [clientTTLMonths, setClientTTLMonths] = useState(2);
 
   return (
     <div
@@ -220,8 +221,56 @@ const EventCard = ({ event, index, onEdit, onDelete, onCopyMagic }) => {
               e.target.style.boxShadow = '0 4px 15px rgba(34, 197, 94, 0.4)';
             }}
           >
-            🔗 Copier Magic Link
+            🔗 Magic Link Admin
           </button>
+
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <select
+              value={clientTTLMonths}
+              onChange={(e) => setClientTTLMonths(parseInt(e.target.value))}
+              title="Durée du lien (TTL)"
+              style={{
+                appearance: 'none',
+                background: 'linear-gradient(45deg, rgba(59,130,246,0.15), rgba(14,165,233,0.15))',
+                color: '#0f172a',
+                border: '1px solid rgba(59,130,246,0.4)',
+                padding: '0.6rem 0.75rem',
+                borderRadius: '10px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <option value={1}>TTL: 1 mois</option>
+              <option value={2}>TTL: 2 mois</option>
+            </select>
+
+          <button
+            onClick={() => onCopyMagicClient(event, clientTTLMonths)}
+            style={{
+              background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
+              color: 'white',
+              border: 'none',
+              padding: '0.75rem 1.5rem',
+              borderRadius: '12px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transform: isHovered ? 'scale(1.05)' : 'scale(1)',
+              transition: 'all 0.3s ease',
+              boxShadow: '0 4px 15px rgba(59, 130, 246, 0.4)'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'scale(1.1)';
+              e.target.style.boxShadow = '0 6px 20px rgba(59, 130, 246, 0.6)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = isHovered ? 'scale(1.05)' : 'scale(1)';
+              e.target.style.boxShadow = '0 4px 15px rgba(59, 130, 246, 0.4)';
+            }}
+          >
+            🔗 Magic Link Client
+          </button>
+          </div>
 
           <button
             onClick={() => onEdit(event)}
@@ -636,6 +685,21 @@ export default function Admin() {
                       setTimeout(() => setToast(''), 3000);
                     } catch (e) {
                       setToast('Erreur lors de la génération du magic link');
+                      setTimeout(() => setToast(''), 3000);
+                    } finally {
+                      setIsCopying(false);
+                    }
+                  }} onCopyMagicClient={async (ev, months) => {
+                    if (isCopying) return;
+                    setIsCopying(true);
+                    try {
+                      const ttlSec = Math.max(1, parseInt(months || 2)) * 30 * 24 * 60 * 60;
+                      const url = await generateMagicLink(`/event/${ev.id}/stats`, ttlSec, 'client');
+                      await navigator.clipboard.writeText(url);
+                      setToast('Magic link client copié dans le presse-papiers');
+                      setTimeout(() => setToast(''), 3000);
+                    } catch (e) {
+                      setToast('Erreur lors de la génération du magic link client');
                       setTimeout(() => setToast(''), 3000);
                     } finally {
                       setIsCopying(false);

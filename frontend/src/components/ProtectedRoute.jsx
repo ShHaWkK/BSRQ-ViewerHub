@@ -20,7 +20,9 @@ export default function ProtectedRoute({ children, aud = 'admin' }) {
   if (state === 'pending') return <div style={{ padding: 24 }}>Chargement…</div>;
   if (state === 'nope') {
     const redirect = `${location.pathname}${location.search || ''}`;
-    const loginUrl = `/login?aud=${encodeURIComponent(aud)}&redirect=${encodeURIComponent(redirect)}`;
+    const loginUrl = aud === 'admin'
+      ? `/admin?redirect=${encodeURIComponent(redirect)}`
+      : `/login?aud=${encodeURIComponent(aud)}&redirect=${encodeURIComponent(redirect)}`;
     window.location.href = loginUrl;
     return null;
   }
