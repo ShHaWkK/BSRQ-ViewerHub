@@ -369,9 +369,35 @@ app.get('/events/:id/now', (req, res) => {
   }
 });
 
+// Endpoint pour récupérer le titre YouTube (URL ou ID accepté)
+app.get('/youtube/title/:input', async (req, res) => {
+  try {
+    const raw = decodeURIComponent(req.params.input || '');
+    const videoId = extractVideoId(raw);
+    if (!videoId) return res.status(400).json({ error: 'invalid_video_id' });
+    const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${process.env.YT_API_KEY}`;
+    let json;
+    try {
+      const yt = await fetch(url, { timeout: 10000 });
+      json = await yt.json();
+    } catch (e) {
+      return res.status(502).json({ error: 'youtube_unreachable' });
+    }
+    const title = (json.items && json.items[0] && json.items[0].snippet && json.items[0].snippet.title) || null;
+    if (!title) return res.status(404).json({ error: 'title_not_found' });
+    res.json({ title, videoId });
+  } catch (e) {
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
 app.get('/events/:id/stream', async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
+    // Fenêtre d'historique configurable via ?minutes
+    const MAX_HISTORY_MINUTES = parseInt(process.env.MAX_HISTORY_MINUTES || '10080'); // 7 jours par défaut
+    const minutesRaw = String(req.query.minutes || '60');
+    const minutesInt = Math.max(1, Math.min(MAX_HISTORY_MINUTES, parseInt(minutesRaw, 10) || 60));
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -382,11 +408,54 @@ app.get('/events/:id/stream', async (req, res) => {
     set.add(res);
     clients.set(ev.id, set);
     req.on('close', () => set.delete(res));
-    // Historique 60 min
-    const { rows } = await pool.query('SELECT ts,total FROM samples WHERE event_id=$1 AND ts > NOW() - INTERVAL \'60 minutes\' ORDER BY ts', [ev.id]);
+    // Historique sur la fenêtre demandée
+    const { rows } = await pool.query(
+      `SELECT ts,total FROM samples 
+       WHERE event_id=$1 AND ts > NOW() - INTERVAL '${minutesInt} minutes' 
+       ORDER BY ts`,
+      [ev.id]
+    );
     const payload = JSON.stringify({ type: 'init', data: { state: ev.state, history: rows } });
     res.write(`data: ${payload}\n\n`);
   } catch {
+    res.status(404).end();
+  }
+});
+
+// Historique JSON: total + (optionnel) par stream
+// GET /events/:id/history?minutes=1440&streams=1&limit=5000
+app.get('/events/:id/history', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    const MAX_HISTORY_MINUTES = parseInt(process.env.MAX_HISTORY_MINUTES || '10080');
+    const minutesRaw = String(req.query.minutes || '60');
+    const minutesInt = Math.max(1, Math.min(MAX_HISTORY_MINUTES, parseInt(minutesRaw, 10) || 60));
+    const limitInt = Math.max(1, Math.min(50000, parseInt(String(req.query.limit || '5000'), 10) || 5000));
+    const includeStreams = String(req.query.streams || '0') === '1';
+
+    const { rows: history } = await pool.query(
+      `SELECT ts,total FROM samples 
+       WHERE event_id=$1 AND ts > NOW() - INTERVAL '${minutesInt} minutes' 
+       ORDER BY ts 
+       LIMIT ${limitInt}`,
+      [ev.id]
+    );
+
+    let streams = [];
+    if (includeStreams) {
+      const { rows } = await pool.query(
+        `SELECT ts, stream_id, concurrent_viewers 
+         FROM stream_samples 
+         WHERE event_id=$1 AND ts > NOW() - INTERVAL '${minutesInt} minutes' 
+         ORDER BY ts 
+         LIMIT ${limitInt}`,
+        [ev.id]
+      );
+      streams = rows;
+    }
+
+    res.json({ history, streams });
+  } catch (e) {
     res.status(404).end();
   }
 });

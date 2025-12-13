@@ -30,11 +30,7 @@ export default function AdminGate() {
 
   if (adminOk === null || clientOk === null) return <div style={{ padding: 24 }}>Chargement…</div>;
   if (adminOk) return <Admin />;
-  // Si l’utilisateur est déjà authentifié côté client, masquer l’interface admin
-  if (clientOk) {
-    navigate('/events', { replace: true });
-    return null;
-  }
+  // Autoriser le login admin même si une session client existe (pas de redirection automatique)
   const redirect = params.get('redirect') || '/admin';
   return <Login forceAud="admin" forceRedirect={redirect} />;
 }

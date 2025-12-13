@@ -8,12 +8,21 @@ export default function ProtectedRoute({ children, aud = 'admin' }) {
   useEffect(() => {
     let mounted = true;
     const url = `/api/auth/check?aud=${encodeURIComponent(aud)}`;
-    fetch(url, { credentials: 'same-origin' })
-      .then(res => {
+    const attempt = async () => {
+      // Petit retry en cas de panne transitoire du backend
+      const tries = [0, 350, 1000];
+      for (let i = 0; i < tries.length; i++) {
+        try {
+          const res = await fetch(url, { credentials: 'same-origin' });
+          if (!mounted) return;
+          if (res.ok) { setState('ok'); return; }
+        } catch {}
         if (!mounted) return;
-        setState(res.ok ? 'ok' : 'nope');
-      })
-      .catch(() => mounted && setState('nope'));
+        if (i < tries.length - 1) await new Promise(r => setTimeout(r, tries[i+1]));
+      }
+      if (mounted) setState('nope');
+    };
+    attempt();
     return () => { mounted = false; };
   }, [aud]);
 

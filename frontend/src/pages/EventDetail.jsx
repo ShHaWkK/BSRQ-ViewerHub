@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getEvent, addStream, removeStream, pauseEvent, startEvent, reactivateStream, updateStream, pauseStream, startStream, toggleStreamFavorite } from '../api.js';
+import { getEvent, addStream, removeStream, pauseEvent, startEvent, reactivateStream, updateStream, pauseStream, startStream, toggleStreamFavorite, getYoutubeTitle } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
 // Composant de particules flottantes
@@ -438,6 +438,9 @@ export default function EventDetail() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
+  const titleFetchTimerRef = useRef(null);
+  const lastAutoTitleRef = useRef('');
+  const userEditedLabelRef = useRef(false);
 
   async function refresh() {
     const ev = await getEvent(id);
@@ -449,6 +452,37 @@ export default function EventDetail() {
   useEffect(() => { 
     refresh(); 
   }, [id]);
+
+  // Auto-compléter le label depuis l'URL/ID YouTube
+  useEffect(() => {
+    // Annuler tout timer en cours
+    if (titleFetchTimerRef.current) {
+      clearTimeout(titleFetchTimerRef.current);
+      titleFetchTimerRef.current = null;
+    }
+    const raw = form.urlOrId?.trim();
+    if (!raw) return;
+    // Déclenchement différé pour éviter d'appeler l'API à chaque frappe
+    titleFetchTimerRef.current = setTimeout(async () => {
+      try {
+        // Ne pas écraser si l'utilisateur a saisi un label manuellement
+        if (userEditedLabelRef.current && form.label?.trim()) return;
+        const { title } = await getYoutubeTitle(encodeURIComponent(raw));
+        if (title && (!form.label || form.label === lastAutoTitleRef.current)) {
+          lastAutoTitleRef.current = title;
+          setForm(prev => ({ ...prev, label: title }));
+        }
+      } catch (e) {
+        // silencieux: l'auto-complétion est best-effort
+      }
+    }, 600);
+    return () => {
+      if (titleFetchTimerRef.current) {
+        clearTimeout(titleFetchTimerRef.current);
+        titleFetchTimerRef.current = null;
+      }
+    };
+  }, [form.urlOrId]);
 
   const submit = async e => {
     e.preventDefault();
@@ -765,7 +799,7 @@ export default function EventDetail() {
               type="text"
               placeholder="Label"
               value={form.label}
-              onChange={e => setForm({ ...form, label: e.target.value })}
+              onChange={e => { userEditedLabelRef.current = true; setForm({ ...form, label: e.target.value }); }}
               style={{
                 padding: '0.75rem',
                 borderRadius: '12px',

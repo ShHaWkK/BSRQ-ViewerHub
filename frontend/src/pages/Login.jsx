@@ -72,8 +72,10 @@ export default function Login({ forceAud, forceRedirect }) {
         } catch {
           target = redirectParam;
         }
-        // Force un rechargement complet pour éviter toute condition de course de cookie
-        window.location.assign(target);
+        // Navigation SPA: le cookie HttpOnly est déjà posé, ProtectedRoute validera
+        // Petite attente pour s'assurer que le navigateur a bien persisté le cookie
+        await new Promise(r => setTimeout(r, 100));
+        navigate(target, { replace: true });
       }
     } catch {
       setError('Erreur réseau');

@@ -13,6 +13,7 @@ import {
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { getEvent } from '../api.js';
+import bsrqLogo from '../assets/bsrq.png';
 
 ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Tooltip, Legend, Filler);
 
@@ -139,9 +140,13 @@ export default function ClientDashboard() {
   return (
     <div className="app-bg">
       <div className="container" style={{ paddingTop: '6vh' }}>
-        <div className="hero">
-          <h1 className="gradient-text" style={{ margin: 0, fontSize: '2rem' }}>Dashboard</h1>
-          <p className="muted" style={{ marginTop: 8 }}>Vue client sans export. Données en temps réel.</p>
+        {/* En-tête brandée */}
+        <div className="hero" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <img src={bsrqLogo} alt="BSRQ" style={{ height: '40px' }} />
+            <h1 className="gradient-text" style={{ margin: 0, fontSize: '2rem' }}>Dashboard Live</h1>
+          </div>
+          <Link to="/events" className="btn btn--brand-gb">Retour</Link>
         </div>
 
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'stretch', marginTop: '1.5rem' }}>
@@ -156,7 +161,7 @@ export default function ClientDashboard() {
             boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
           }}>
             <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.8)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
-              Total Spectateurs
+              TOTAL SPECTATEURS
             </div>
             <div style={{ fontSize: '3.5rem', fontWeight: '800', background: 'linear-gradient(45deg, #10b981, #3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', lineHeight: '1' }}>
               {totalViewers?.toLocaleString() || 0}
@@ -185,10 +190,6 @@ export default function ClientDashboard() {
               <Line data={chartData} options={chartOptions} datasetIdKey="id" />
             </div>
           </div>
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-          <Link to="/events" className="btn btn--brand-gb">Retour</Link>
         </div>
       </div>
     </div>
