@@ -305,6 +305,8 @@ export default function Dashboard() {
   const esRef = useRef(null);
   const sseFlushTimerRef = useRef(null);
   const sseBufferRef = useRef({ totals: [], streams: new Map(), lastState: null });
+  const lastMsgTsRef = useRef(Date.now());
+  const sseMonitorTimerRef = useRef(null);
   const SSE_THROTTLE_MS = 250; // rafraîchissement plus réactif
 
   useEffect(() => {
@@ -319,12 +321,28 @@ export default function Dashboard() {
         esRef.current.close();
         esRef.current = null;
       }
+      if (sseMonitorTimerRef.current) {
+        clearInterval(sseMonitorTimerRef.current);
+        sseMonitorTimerRef.current = null;
+      }
       // Afficher par défaut les dernières 24h pour voir les variations quotidiennes
       const params = `minutes=1440`;
       const base = API_BASE;
       const url = `${String(base).replace(/\/+$/, '')}/events/${id}/stream?${params}`;
       const useCreds = (typeof base === 'string' && base.startsWith('/'));
       esRef.current = new EventSource(url, useCreds ? { withCredentials: true } : undefined);
+      lastMsgTsRef.current = Date.now();
+      // Moniteur: si aucune donnée reçue pendant trop longtemps, on reconnecte
+      sseMonitorTimerRef.current = setInterval(() => {
+        const pollSec = (event?.pollIntervalSec && Number(event.pollIntervalSec)) || 60;
+        const thresholdMs = Math.max(20000, pollSec * 2000); // au moins 20s, sinon 2×poll
+        if (Date.now() - lastMsgTsRef.current > thresholdMs) {
+          try { if (esRef.current) esRef.current.close(); } catch {}
+          esRef.current = null;
+          // Reconnexion silencieuse
+          setupES();
+        }
+      }, 5000);
       // Fallback automatique en cas d'erreur (ex: proxy dev renvoyant du HTML)
       esRef.current.onerror = () => {
         try {
@@ -335,6 +353,7 @@ export default function Dashboard() {
           }
         } catch {}
       };
+      esRef.current.onopen = () => { lastMsgTsRef.current = Date.now(); };
       esRef.current.onmessage = ev => {
         const raw = ev.data;
         if (!raw || raw[0] !== '{') return;
@@ -345,6 +364,7 @@ export default function Dashboard() {
           return;
         }
         if (msg.type === 'init') {
+          lastMsgTsRef.current = Date.now();
           sseBufferRef.current.lastState = msg.data.state;
           setEvent(e => ({ ...e, state: msg.data.state }));
           setHistory(msg.data.history);
@@ -352,6 +372,7 @@ export default function Dashboard() {
           setTotalViewers(msg.data.state?.total || 0);
         }
         if (msg.type === 'tick') {
+          lastMsgTsRef.current = Date.now();
           // Bufferiser et flush avec throttling pour limiter les re-renders
           sseBufferRef.current.lastState = {
             total: msg.data.total,
@@ -399,6 +420,11 @@ export default function Dashboard() {
                 });
                 buf.streams.clear();
               }
+              // Forcer le redraw du graphique total si disponible
+              try {
+                const chart = totalChartRef.current;
+                if (chart && typeof chart.update === 'function') chart.update('none');
+              } catch {}
             }, SSE_THROTTLE_MS);
           };
           scheduleFlush();
@@ -426,6 +452,10 @@ export default function Dashboard() {
       if (sseFlushTimerRef.current) {
         clearTimeout(sseFlushTimerRef.current);
         sseFlushTimerRef.current = null;
+      }
+      if (sseMonitorTimerRef.current) {
+        clearInterval(sseMonitorTimerRef.current);
+        sseMonitorTimerRef.current = null;
       }
     };
   }, [id, event?.created_at]);
@@ -542,6 +572,7 @@ export default function Dashboard() {
   const seriesVisiblePoints = seriesPoints.filter(p => p.x >= xMin && p.x <= xMax);
   const data = {
     datasets: [{
+      id: 'total',
       label: 'Spectateurs',
       data: seriesVisiblePoints,
       borderColor: '#0c2164ff',
@@ -557,7 +588,9 @@ export default function Dashboard() {
     }]
   };
   
-  const maxTotal = Math.max(10, ...seriesVisiblePoints.map(p => (typeof p.y === 'number' ? p.y : Number(p.y) || 0)));
+  const visibleYs = seriesVisiblePoints.map(p => (typeof p.y === 'number' ? p.y : Number(p.y) || 0));
+  const maxTotal = visibleYs.length ? Math.max(10, ...visibleYs) : 10;
+  const minTotal = visibleYs.length ? Math.min(...visibleYs) : 0;
   const options = {
     responsive: true,
     maintainAspectRatio: false,
@@ -591,8 +624,9 @@ export default function Dashboard() {
         ticks: { color: 'rgba(255, 255, 255, 0.7)', maxTicksLimit: 10 }
       },
       y: {
-        beginAtZero: true,
-        suggestedMax: Math.ceil(maxTotal * 1.1),
+        beginAtZero: false,
+        min: Math.max(0, Math.floor(minTotal * 0.95)),
+        max: Math.max(Math.ceil(maxTotal * 1.05), 11),
         grid: { color: 'rgba(255, 255, 255, 0.1)' },
         ticks: { color: 'rgba(255, 255, 255, 0.7)' }
       }
@@ -631,6 +665,14 @@ export default function Dashboard() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+
+  // Forcer une mise à jour du graphique quand l'historique change
+  React.useEffect(() => {
+    try {
+      const chart = totalChartRef.current;
+      if (chart && typeof chart.update === 'function') chart.update('none');
+    } catch {}
+  }, [history]);
 
   return (
     <div style={{
@@ -783,7 +825,7 @@ export default function Dashboard() {
               📈 Évolution Temps Réel
             </h3>
             <div style={{ height: '300px', position: 'relative' }}>
-              <Line ref={totalChartRef} data={data} options={options} />
+              <Line ref={totalChartRef} data={data} options={options} datasetIdKey="id" />
               {seriesVisiblePoints.length === 0 && (
                 <div style={{
                   position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
