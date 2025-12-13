@@ -303,8 +303,6 @@ export default function Dashboard() {
   const totalChartRef = useRef(null);
   const streamChartRefs = useRef({});
   const esRef = useRef(null);
-  const sseReconnectAttemptRef = useRef(0);
-  const sseReconnectTimerRef = useRef(null);
   const sseFlushTimerRef = useRef(null);
   const sseBufferRef = useRef({ totals: [], streams: new Map(), lastState: null });
   const SSE_THROTTLE_MS = 1000; // 1s
@@ -323,32 +321,16 @@ export default function Dashboard() {
       }
       // Afficher par défaut les dernières 24h pour voir les variations quotidiennes
       const params = `minutes=1440`;
-      const base = (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined')
-        ? `${proto}//${host}:4000`
-        : API_BASE;
-      const url = `${String(base).replace(/\/+$/, '')}/events/${id}/stream?${params}`;
-      const withCreds = (typeof base === 'string' && base.startsWith('/'));
-      esRef.current = new EventSource(url, withCreds ? { withCredentials: true } : undefined);
-      esRef.current.onopen = () => {
-        sseReconnectAttemptRef.current = 0;
-      };
-      // Reconnexion automatique avec backoff exponentiel en cas d'erreur
+      esRef.current = new EventSource(`${API_BASE.replace(/\/+$/, '')}/events/${id}/stream?${params}`);
+      // Fallback automatique en cas d'erreur (ex: proxy dev renvoyant du HTML)
       esRef.current.onerror = () => {
         try {
-          if (esRef.current) {
+          if (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined') {
+            const direct = `${proto}//${host}:4000`;
             esRef.current.close();
-            esRef.current = null;
+            esRef.current = new EventSource(`${direct.replace(/\/+$/, '')}/events/${id}/stream?${params}`);
           }
         } catch {}
-        const backoff = Math.min(30000, 1000 * Math.pow(2, sseReconnectAttemptRef.current || 0));
-        sseReconnectAttemptRef.current = (sseReconnectAttemptRef.current || 0) + 1;
-        if (sseReconnectTimerRef.current) {
-          clearTimeout(sseReconnectTimerRef.current);
-          sseReconnectTimerRef.current = null;
-        }
-        sseReconnectTimerRef.current = setTimeout(() => {
-          setupES();
-        }, backoff);
       };
       esRef.current.onmessage = ev => {
         const raw = ev.data;
@@ -557,7 +539,6 @@ export default function Dashboard() {
   const seriesVisiblePoints = seriesPoints.filter(p => p.x >= xMin && p.x <= xMax);
   const data = {
     datasets: [{
-      id: 'total',
       label: 'Spectateurs',
       data: seriesVisiblePoints,
       borderColor: '#0c2164ff',
@@ -799,7 +780,7 @@ export default function Dashboard() {
               📈 Évolution Temps Réel
             </h3>
             <div style={{ height: '300px', position: 'relative' }}>
-              <Line ref={totalChartRef} data={data} options={options} datasetIdKey="id" />
+              <Line ref={totalChartRef} data={data} options={options} />
               {seriesVisiblePoints.length === 0 && (
                 <div style={{
                   position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -926,7 +907,6 @@ export default function Dashboard() {
                   const st = event.state?.streams?.[stream.id];
                   const sd = {
                     datasets: [{
-                      id: stream.id,
                       label: stream.label,
                       data: points,
                       borderColor: st?.online ? '#10b981' : '#ef4444',
@@ -945,7 +925,7 @@ export default function Dashboard() {
                     }}>
                       <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: 'white' }}>🎬 {stream.label}</div>
                       <div style={{ height: '200px' }}>
-                        <Line ref={el => (streamChartRefs.current[stream.id] = el)} data={sd} options={{ ...options, maintainAspectRatio: false }} datasetIdKey="id" />
+                        <Line ref={el => (streamChartRefs.current[stream.id] = el)} data={sd} options={{ ...options, maintainAspectRatio: false }} />
                       </div>
                       <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                         <button
