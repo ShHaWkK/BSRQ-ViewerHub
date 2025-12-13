@@ -11,21 +11,24 @@ import Login from './pages/Login.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import ClientHome from './pages/ClientHome.jsx';
 import './styles.css';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<ProtectedRoute aud="client"><ClientHome /></ProtectedRoute>} />
-        <Route path="/events" element={<ProtectedRoute aud="client"><ClientHome /></ProtectedRoute>} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/admin" element={<AdminGate />} />
-        <Route path="/admin/event/:id" element={<ProtectedRoute aud="admin"><EventDetail /></ProtectedRoute>} />
-        <Route path="/event/:id/dashboard" element={<ProtectedRoute aud="admin"><Dashboard /></ProtectedRoute>} />
-        <Route path="/event/:id/stats" element={<ProtectedRoute aud="client"><ClientDashboard /></ProtectedRoute>} />
-        <Route path="/event/:id/live" element={<ProtectedRoute aud="client"><LiveViewer /></ProtectedRoute>} />
-        <Route path="*" element={<Navigate to="/events" replace />} />
-      </Routes>
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/" element={<ProtectedRoute aud="client"><ClientHome /></ProtectedRoute>} />
+          <Route path="/events" element={<ProtectedRoute aud="client"><ClientHome /></ProtectedRoute>} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/admin" element={<AdminGate />} />
+          <Route path="/admin/event/:id" element={<ProtectedRoute aud="admin"><EventDetail /></ProtectedRoute>} />
+          <Route path="/event/:id/dashboard" element={<ProtectedRoute aud="admin"><Dashboard /></ProtectedRoute>} />
+          <Route path="/event/:id/stats" element={<ProtectedRoute aud="client"><ClientDashboard /></ProtectedRoute>} />
+          <Route path="/event/:id/live" element={<ProtectedRoute aud="client"><LiveViewer /></ProtectedRoute>} />
+          <Route path="*" element={<Navigate to="/events" replace />} />
+        </Routes>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

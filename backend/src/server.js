@@ -410,9 +410,22 @@ app.get('/events/:id/now', (req, res) => {
 });
 
 // Endpoint pour récupérer le titre YouTube (URL ou ID accepté)
-app.get('/youtube/title/:input', async (req, res) => {
+// Accepte plusieurs formes:
+// - /youtube/title/:input(*)  -> paramètre pouvant contenir des slashes (URL complète encodée ou non)
+// - /youtube/title?input=...  -> via query string (input ou url)
+async function handleYoutubeTitle(req, res) {
   try {
-    const raw = decodeURIComponent(req.params.input || '');
+    // Lire depuis paramètre ou depuis query
+    let raw = '';
+    if (typeof req.params?.input === 'string') {
+      // Autoriser les URL non encodées (peuvent contenir des '/')
+      try { raw = decodeURIComponent(req.params.input); } catch { raw = req.params.input; }
+    } else if (typeof req.query?.input === 'string') {
+      raw = req.query.input;
+    } else if (typeof req.query?.url === 'string') {
+      raw = req.query.url;
+    }
+    raw = String(raw || '').trim();
     const videoId = extractVideoId(raw);
     if (!videoId) return res.status(400).json({ error: 'invalid_video_id' });
     if (!process.env.YT_API_KEY) {
@@ -433,7 +446,11 @@ app.get('/youtube/title/:input', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: 'internal_error' });
   }
-});
+}
+
+// Routes compatibles
+app.get('/youtube/title/:input(*)', handleYoutubeTitle);
+app.get('/youtube/title', handleYoutubeTitle);
 
 app.get('/events/:id/stream', async (req, res) => {
   try {

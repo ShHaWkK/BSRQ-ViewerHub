@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom';
 export default function ProtectedRoute({ children, aud = 'admin' }) {
   const [state, setState] = useState('pending');
   const location = useLocation();
+  const [redirectUrl, setRedirectUrl] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -33,14 +34,17 @@ export default function ProtectedRoute({ children, aud = 'admin' }) {
     return () => { mounted = false; };
   }, [aud]);
 
-  if (state === 'pending') return <div style={{ padding: 24 }}>Chargement…</div>;
-  if (state === 'nope') {
+  useEffect(() => {
+    if (state !== 'nope') return;
     const redirect = `${location.pathname}${location.search || ''}`;
     const loginUrl = aud === 'admin'
       ? `/admin?redirect=${encodeURIComponent(redirect)}`
       : `/login?aud=${encodeURIComponent(aud)}&redirect=${encodeURIComponent(redirect)}`;
-    window.location.href = loginUrl;
-    return null;
-  }
+    setRedirectUrl(loginUrl);
+    try { window.location.replace(loginUrl); } catch { window.location.href = loginUrl; }
+  }, [state, aud, location.pathname, location.search]);
+
+  if (state === 'pending') return <div style={{ padding: 24 }}>Chargement…</div>;
+  if (state === 'nope') return <div style={{ padding: 24 }}>Redirection… <a href={redirectUrl}>continuer</a></div>;
   return children;
 }

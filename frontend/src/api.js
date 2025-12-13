@@ -175,7 +175,9 @@ export async function startStream(eventId, streamId) {
 
 // Récupérer le titre YouTube avec repli si la base API relative renvoie du HTML
 export async function getYoutubeTitle(videoId) {
-  const res = await fetchWithFallback(`/youtube/title/${videoId}`);
+  // Encoder systématiquement pour supporter les URLs complètes
+  const safe = encodeURIComponent(String(videoId || ''));
+  const res = await fetchWithFallback(`/youtube/title/${safe}`);
   return readJsonOrThrow(res);
 }
 

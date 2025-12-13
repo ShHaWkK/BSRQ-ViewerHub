@@ -26,6 +26,8 @@ export default function ClientDashboard() {
   const esRef = useRef(null);
   const sseReconnectAttemptRef = useRef(0);
   const sseReconnectTimerRef = useRef(null);
+  const pollTimerRef = useRef(null);
+  const lastUpdateRef = useRef(0);
 
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
@@ -62,13 +64,19 @@ export default function ClientDashboard() {
       const url = `${String(base).replace(/\/+$/, '')}/events/${id}/stream?${params}`;
       const withCreds = (typeof base === 'string' && base.startsWith('/'));
       esRef.current = new EventSource(url, withCreds ? { withCredentials: true } : undefined);
-      esRef.current.onopen = () => { sseReconnectAttemptRef.current = 0; };
+      esRef.current.onopen = () => {
+        // SSE actif: arrêter le polling fallback
+        sseReconnectAttemptRef.current = 0;
+        if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
+      };
       esRef.current.onerror = () => {
         try { if (esRef.current) { esRef.current.close(); esRef.current = null; } } catch {}
         const backoff = Math.min(30000, 1000 * Math.pow(2, sseReconnectAttemptRef.current || 0));
         sseReconnectAttemptRef.current = (sseReconnectAttemptRef.current || 0) + 1;
         if (sseReconnectTimerRef.current) { clearTimeout(sseReconnectTimerRef.current); sseReconnectTimerRef.current = null; }
         sseReconnectTimerRef.current = setTimeout(() => setupES(), backoff);
+        // Basculer immédiatement sur polling en cas d'erreur SSE
+        if (!pollTimerRef.current) startPolling(10000);
       };
       esRef.current.onmessage = ev => {
         const raw = ev.data;
@@ -78,6 +86,9 @@ export default function ClientDashboard() {
           const rows = Array.isArray(msg.data?.history) ? msg.data.history : [];
           setHistory(rows.map(r => ({ ts: new Date(r.ts).getTime(), total: r.total })));
           setEvent(e => ({ ...(e || {}), state: msg.data?.state }));
+          const tot = Number(msg.data?.state?.total || 0);
+          setTotalViewers(t => { setPreviousTotal(t); return tot; });
+          lastUpdateRef.current = Date.now();
         } else if (msg.type === 'tick') {
           const ts = new Date(msg.data?.ts).getTime();
           const tot = Number(msg.data?.total || 0);
@@ -91,6 +102,7 @@ export default function ClientDashboard() {
             const cutoff = Date.now() - 24 * 60 * 60 * 1000;
             return next.filter(p => p.ts >= cutoff);
           });
+          lastUpdateRef.current = Date.now();
         }
       };
     };
@@ -99,21 +111,52 @@ export default function ClientDashboard() {
       if (document.hidden) {
         try { if (esRef.current) esRef.current.close(); } catch {}
         esRef.current = null;
+        // quand la page est cachée, inutile de poller
+        if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
       } else {
         setupES();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
+
+    // Watchdog: si aucune mise à jour depuis X secondes, démarrer le polling
+    const watchdog = setInterval(() => {
+      const now = Date.now();
+      const STALE_MS = 20000; // 20s sans tick => démarrer polling
+      if (lastUpdateRef.current && now - lastUpdateRef.current > STALE_MS) {
+        if (!pollTimerRef.current) startPolling(10000);
+      }
+    }, 5000);
+
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       try { if (esRef.current) esRef.current.close(); } catch {}
       esRef.current = null;
       if (sseReconnectTimerRef.current) { clearTimeout(sseReconnectTimerRef.current); sseReconnectTimerRef.current = null; }
+      if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
+      clearInterval(watchdog);
     };
   }, [id]);
 
+  function startPolling(intervalMs = 10000) {
+    if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
+    pollTimerRef.current = setInterval(async () => {
+      try {
+        const ev = await getEvent(id);
+        const ts = Date.now();
+        const tot = Number(ev?.state?.total || 0);
+        setTotalViewers(t => { setPreviousTotal(t); return tot; });
+        setHistory(h => {
+          const next = h.concat({ ts, total: tot });
+          const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+          return next.filter(p => p.ts >= cutoff);
+        });
+        lastUpdateRef.current = Date.now();
+      } catch {}
+    }, Math.max(3000, intervalMs));
+  }
+
   const chartData = {
-    labels: history.map(p => p.ts),
     datasets: [
       {
         label: 'Total viewers',

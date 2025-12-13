@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react';
+// Dashboard.jsx
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Line } from 'react-chartjs-2';
 import {
@@ -13,35 +14,39 @@ import {
   Decimation
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
-import EventDetail from './EventDetail.jsx';
+import EventDetail from './EventDetail.jsx'; // gardé (même si non utilisé ici)
 import { getEvent } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
 ChartJS.register(LineElement, PointElement, LinearScale, TimeScale, Tooltip, Legend, Filler, Decimation);
 
-// Composant de particules animées
+/* =========================
+   Particles
+========================= */
 const ParticleSystem = () => {
   const canvasRef = useRef(null);
   const particlesRef = useRef([]);
-  const animationRef = useRef();
+  const animationRef = useRef(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReduced) return; // désactive pour les utilisateurs sensibles/économie
-    
+
+    const prefersReduced =
+      window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) return;
+
     const ctx = canvas.getContext('2d');
+
     const updateCanvasSize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
     };
     updateCanvasSize();
 
-    // Créer des particules
     const createParticles = () => {
       particlesRef.current = [];
-      const base = 24; // réduit pour limiter l'usage GPU
+      const base = 24;
       for (let i = 0; i < base; i++) {
         particlesRef.current.push({
           x: Math.random() * canvas.width,
@@ -56,23 +61,23 @@ const ParticleSystem = () => {
     };
 
     const animate = () => {
-      if (document.hidden) return; // pause si onglet caché
+      if (document.hidden) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      particlesRef.current.forEach((particle) => {
-        particle.x += particle.vx;
-        particle.y += particle.vy;
-        particle.hue += 0.5;
-        
-        if (particle.x < 0 || particle.x > canvas.width) particle.vx *= -1;
-        if (particle.y < 0 || particle.y > canvas.height) particle.vy *= -1;
-        
+
+      particlesRef.current.forEach((p) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.hue += 0.5;
+
+        if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+        if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+
         ctx.beginPath();
-        ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-        ctx.fillStyle = `hsla(${particle.hue}, 70%, 60%, ${particle.opacity})`;
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${p.hue}, 70%, 60%, ${p.opacity})`;
         ctx.fill();
       });
-      
+
       animationRef.current = requestAnimationFrame(animate);
     };
 
@@ -84,24 +89,22 @@ const ParticleSystem = () => {
       createParticles();
     };
 
-    window.addEventListener('resize', handleResize);
     const handleVisibility = () => {
-      if (!document.hidden && !animationRef.current) {
-        animate();
-      }
+      if (!document.hidden && !animationRef.current) animate();
       if (document.hidden && animationRef.current) {
         cancelAnimationFrame(animationRef.current);
         animationRef.current = null;
       }
     };
+
+    window.addEventListener('resize', handleResize);
     document.addEventListener('visibilitychange', handleVisibility);
-    
+
     return () => {
       window.removeEventListener('resize', handleResize);
       document.removeEventListener('visibilitychange', handleVisibility);
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
     };
   }, []);
 
@@ -122,41 +125,39 @@ const ParticleSystem = () => {
   );
 };
 
-// Composant StreamCard amélioré
+/* =========================
+   Stream Card
+========================= */
 const DynamicStreamCard = ({ label, current, online }) => {
   const [displayViewers, setDisplayViewers] = useState(current);
   const [isAnimating, setIsAnimating] = useState(false);
 
   useEffect(() => {
-    if (current !== displayViewers) {
-      setIsAnimating(true);
-      
-      const duration = 1000;
-      const startTime = Date.now();
-      const startValue = displayViewers;
-      const targetValue = current;
+    if (typeof current !== 'number') return;
+    if (current === displayViewers) return;
 
-      const animate = () => {
-        const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        
-        const easedProgress = 1 - Math.pow(1 - progress, 3);
-        const currentValue = Math.round(startValue + (targetValue - startValue) * easedProgress);
-        setDisplayViewers(currentValue);
+    setIsAnimating(true);
+    const duration = 1000;
+    const startTime = Date.now();
+    const startValue = displayViewers;
+    const targetValue = current;
 
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        } else {
-          setIsAnimating(false);
-        }
-      };
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const value = Math.round(startValue + (targetValue - startValue) * eased);
+      setDisplayViewers(value);
 
-      animate();
-    }
-  }, [current, displayViewers]);
+      if (progress < 1) requestAnimationFrame(animate);
+      else setIsAnimating(false);
+    };
+
+    animate();
+  }, [current]); // volontaire: pas displayViewers dans deps
 
   return (
-    <div 
+    <div
       className="stream-card"
       style={{
         background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
@@ -172,15 +173,16 @@ const DynamicStreamCard = ({ label, current, online }) => {
         boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
       }}
       onMouseEnter={(e) => {
-        e.target.style.transform = 'translateY(-5px) scale(1.02)';
-        e.target.style.boxShadow = '0 20px 40px rgba(0,0,0,0.4)';
+        const el = e.currentTarget;
+        el.style.transform = 'translateY(-5px) scale(1.02)';
+        el.style.boxShadow = '0 20px 40px rgba(0,0,0,0.4)';
       }}
       onMouseLeave={(e) => {
-        e.target.style.transform = 'translateY(0) scale(1)';
-        e.target.style.boxShadow = '0 8px 32px rgba(0,0,0,0.3)';
+        const el = e.currentTarget;
+        el.style.transform = 'translateY(0) scale(1)';
+        el.style.boxShadow = '0 8px 32px rgba(0,0,0,0.3)';
       }}
     >
-      {/* Effet de brillance */}
       <div
         style={{
           position: 'absolute',
@@ -192,20 +194,29 @@ const DynamicStreamCard = ({ label, current, online }) => {
           animation: online ? 'shine 3s infinite' : 'none'
         }}
       />
-      
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-        <h3 style={{ 
-          margin: 0, 
-          fontSize: '1.1rem', 
-          fontWeight: '600',
-          background: online ? 'linear-gradient(45deg, #10b981, #3b82f6)' : 'linear-gradient(45deg, #6b7280, #9ca3af)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          backgroundClip: 'text'
-        }}>
+        <h3
+          title={label}
+          style={{
+            margin: 0,
+            fontSize: '1.1rem',
+            fontWeight: '600',
+            background: online
+              ? 'linear-gradient(45deg, #10b981, #3b82f6)'
+              : 'linear-gradient(45deg, #6b7280, #9ca3af)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+            maxWidth: '70%',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis'
+          }}
+        >
           {label}
         </h3>
-        
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <div
             style={{
@@ -216,16 +227,12 @@ const DynamicStreamCard = ({ label, current, online }) => {
               animation: online ? 'pulse 2s infinite' : 'none'
             }}
           />
-          <span style={{ 
-            fontSize: '0.8rem', 
-            color: online ? '#10b981' : '#ef4444',
-            fontWeight: '500'
-          }}>
+          <span style={{ fontSize: '0.8rem', color: online ? '#10b981' : '#ef4444', fontWeight: '500' }}>
             {online ? 'LIVE' : 'OFFLINE'}
           </span>
         </div>
       </div>
-      
+
       <div style={{ textAlign: 'center' }}>
         <div
           style={{
@@ -238,18 +245,13 @@ const DynamicStreamCard = ({ label, current, online }) => {
             animation: isAnimating ? 'glow 0.5s ease-in-out' : 'none'
           }}
         >
-          {displayViewers?.toLocaleString() || 0}
+          {Number(displayViewers || 0).toLocaleString()}
         </div>
-        <div style={{ 
-          fontSize: '0.9rem', 
-          color: 'rgba(255,255,255,0.7)',
-          marginTop: '0.25rem'
-        }}>
+        <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.7)', marginTop: '0.25rem' }}>
           spectateurs
         </div>
       </div>
-      
-      {/* Barre de progression */}
+
       <div
         style={{
           marginTop: '1rem',
@@ -262,11 +264,9 @@ const DynamicStreamCard = ({ label, current, online }) => {
         <div
           style={{
             height: '100%',
-            background: online 
-              ? 'linear-gradient(90deg, #10b981, #3b82f6)' 
-              : 'linear-gradient(90deg, #6b7280, #9ca3af)',
+            background: online ? 'linear-gradient(90deg, #10b981, #3b82f6)' : 'linear-gradient(90deg, #6b7280, #9ca3af)',
             borderRadius: '2px',
-            width: `${Math.min(100, (displayViewers / 50000) * 100)}%`,
+            width: `${Math.min(100, (Number(displayViewers || 0) / 50000) * 100)}%`,
             transition: 'width 1s cubic-bezier(0.4, 0, 0.2, 1)',
             boxShadow: online ? '0 0 10px rgba(16, 185, 129, 0.5)' : 'none'
           }}
@@ -276,212 +276,349 @@ const DynamicStreamCard = ({ label, current, online }) => {
   );
 };
 
+/* =========================
+   Dashboard
+========================= */
 export default function Dashboard() {
   const { id } = useParams();
+
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-  let API_BASE = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
-  // Si la base est relative (ex: '/api') et qu'on accède via un serveur dev (3000/3001/3019),
-  // basculer vers le backend direct sur :4000 pour garantir SSE et éviter du HTML côté frontend.
-  if (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined') {
-    const port = window.location.port;
-    const devPorts = new Set(['3000', '3001', '3019']);
-    if (devPorts.has(port)) {
-      API_BASE = `${proto}//${host}:4000`;
+
+  const API_BASE = useMemo(() => {
+    let base = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
+
+    // dev: si VITE_API_URL est relative, forcer backend :4000 depuis ports dev
+    if (typeof base === 'string' && base.startsWith('/') && typeof window !== 'undefined') {
+      const port = window.location.port;
+      const devPorts = new Set(['3000', '3001', '3019']);
+      if (devPorts.has(port)) base = `${proto}//${host}:4000`;
     }
-  }
+
+    return String(base).replace(/\/+$/, '');
+  }, [host, proto]);
+
   const [event, setEvent] = useState(null);
   const [history, setHistory] = useState([]);
-  const [historyMinutes, setHistoryMinutes] = useState('all'); // forcé à 'all' pour couvrir toute la durée
-  const [totalViewers, setTotalViewers] = useState(0);
-  const [previousTotal, setPreviousTotal] = useState(0);
   const [streamsHistory, setStreamsHistory] = useState({});
   const [showStreamCharts, setShowStreamCharts] = useState(false);
+
+  const [totalViewers, setTotalViewers] = useState(0);
+  const [previousTotal, setPreviousTotal] = useState(0);
+
   const [jobExporting, setJobExporting] = useState(false);
   const [jobProgress, setJobProgress] = useState(0);
   const [jobId, setJobId] = useState(null);
+
   const totalChartRef = useRef(null);
   const streamChartRefs = useRef({});
+
   const esRef = useRef(null);
   const sseFlushTimerRef = useRef(null);
-  const sseBufferRef = useRef({ totals: [], streams: new Map(), lastState: null });
-  const lastMsgTsRef = useRef(Date.now());
   const sseMonitorTimerRef = useRef(null);
-  const SSE_THROTTLE_MS = 250; // rafraîchissement plus réactif
+  const reconnectAttemptRef = useRef(0);
+  const reconnectTimerRef = useRef(null);
 
-  useEffect(() => {
-    getEvent(id).then(ev => {
-      setEvent(ev);
-      setPreviousTotal(ev.state?.total || 0);
-      setTotalViewers(ev.state?.total || 0);
+  const lastMsgTsRef = useRef(Date.now());
+  const lastTotalRef = useRef(0);
+  const createdAtRef = useRef(null);
+
+  const sseBufferRef = useRef({ totals: [], streams: new Map(), lastState: null });
+  const SSE_THROTTLE_MS = 250;
+
+  const getChartInstance = (refObj) => {
+    const r = refObj?.current;
+    if (!r) return null;
+    // react-chartjs-2 peut exposer soit l’instance directe, soit { chart }
+    if (typeof r.update === 'function') return r;
+    if (r.chart && typeof r.chart.update === 'function') return r.chart;
+    return null;
+  };
+
+  // Helpers export
+  const downloadDataUrl = (filename, dataUrl) => {
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const exportTotalCsvLocal = (filename) => {
+    const header = "Heure,Total de spectateurs de l'events\n";
+    const rows = (Array.isArray(history) ? history : []).map((r) => {
+      const heure = new Date(r.ts).toLocaleTimeString('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+      const total = typeof r.total === 'number' ? r.total : Number(r.total) || 0;
+      return `${heure},${total}`;
     });
 
+    const csv = header + rows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // 1) Charger event (métadonnées)
+  useEffect(() => {
+    let aborted = false;
+
+    (async () => {
+      try {
+        const ev = await getEvent(id);
+        if (aborted) return;
+        setEvent(ev);
+        if (ev?.created_at) createdAtRef.current = ev.created_at;
+
+        const initTotal = typeof ev?.state?.total === 'number' ? ev.state.total : 0;
+        lastTotalRef.current = initTotal;
+        setPreviousTotal(initTotal);
+        setTotalViewers(initTotal);
+      } catch {}
+    })();
+
+    return () => {
+      aborted = true;
+    };
+  }, [id]);
+
+  // 2) SSE live (reconnexion + ajout point + update total)
+  useEffect(() => {
+    const cleanup = () => {
+      try { esRef.current?.close(); } catch {}
+      esRef.current = null;
+
+      if (sseFlushTimerRef.current) clearTimeout(sseFlushTimerRef.current);
+      sseFlushTimerRef.current = null;
+
+      if (sseMonitorTimerRef.current) clearInterval(sseMonitorTimerRef.current);
+      sseMonitorTimerRef.current = null;
+
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+
+      // reset buffer
+      sseBufferRef.current.totals = [];
+      sseBufferRef.current.streams = new Map();
+      sseBufferRef.current.lastState = null;
+    };
+
+    const scheduleReconnect = () => {
+      if (reconnectTimerRef.current) return;
+
+      const backoff = Math.min(30000, 1000 * Math.pow(2, reconnectAttemptRef.current));
+      reconnectAttemptRef.current += 1;
+
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null;
+        setupES();
+      }, backoff);
+    };
+
     const setupES = () => {
-      if (esRef.current) {
-        esRef.current.close();
-        esRef.current = null;
-      }
+      // stop previous
+      try { esRef.current?.close(); } catch {}
+      esRef.current = null;
+
       if (sseMonitorTimerRef.current) {
         clearInterval(sseMonitorTimerRef.current);
         sseMonitorTimerRef.current = null;
       }
-      // Afficher par défaut les dernières 24h pour voir les variations quotidiennes
-      const params = `minutes=1440`;
-      const base = API_BASE;
-      const url = `${String(base).replace(/\/+$/, '')}/events/${id}/stream?${params}`;
-      const useCreds = (typeof base === 'string' && base.startsWith('/'));
-      esRef.current = new EventSource(url, useCreds ? { withCredentials: true } : undefined);
+
+      const url = `${API_BASE}/events/${id}/stream?minutes=1440`;
+
+      // Toujours withCredentials: si cookie auth -> indispensable
+      esRef.current = new EventSource(url, { withCredentials: true });
+
       lastMsgTsRef.current = Date.now();
-      // Moniteur: si aucune donnée reçue pendant trop longtemps, on reconnecte
-      sseMonitorTimerRef.current = setInterval(() => {
-        const pollSec = (event?.pollIntervalSec && Number(event.pollIntervalSec)) || 60;
-        const thresholdMs = Math.max(20000, pollSec * 2000); // au moins 20s, sinon 2×poll
-        if (Date.now() - lastMsgTsRef.current > thresholdMs) {
-          try { if (esRef.current) esRef.current.close(); } catch {}
-          esRef.current = null;
-          // Reconnexion silencieuse
-          setupES();
-        }
-      }, 5000);
-      // Fallback automatique en cas d'erreur (ex: proxy dev renvoyant du HTML)
-      esRef.current.onerror = () => {
-        try {
-          if (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined') {
-            const direct = `${proto}//${host}:4000`;
-            esRef.current.close();
-            esRef.current = new EventSource(`${direct.replace(/\/+$/, '')}/events/${id}/stream?${params}`);
-          }
-        } catch {}
+
+      esRef.current.onopen = () => {
+        reconnectAttemptRef.current = 0;
+        lastMsgTsRef.current = Date.now();
       };
-      esRef.current.onopen = () => { lastMsgTsRef.current = Date.now(); };
-      esRef.current.onmessage = ev => {
+
+      esRef.current.onerror = () => {
+        try { esRef.current?.close(); } catch {}
+        esRef.current = null;
+        scheduleReconnect();
+      };
+
+      esRef.current.onmessage = (ev) => {
+        lastMsgTsRef.current = Date.now();
+
         const raw = ev.data;
         if (!raw || raw[0] !== '{') return;
+
         let msg;
-        try {
-          msg = JSON.parse(raw);
-        } catch {
+        try { msg = JSON.parse(raw); } catch { return; }
+
+        if (msg.type === 'init') {
+          const st = msg?.data?.state || null;
+
+          setEvent((prev) => {
+            // si on n’a pas encore l’event (métadonnées), on tente d’en créer un minimum
+            if (!prev) return { ...(msg?.data?.event || {}), state: st };
+            return { ...prev, state: st };
+          });
+
+          if (Array.isArray(msg?.data?.history)) setHistory(msg.data.history);
+
+          // init total
+          const initTotal = typeof st?.total === 'number' ? st.total : Number(st?.total) || 0;
+          lastTotalRef.current = initTotal;
+          setPreviousTotal(initTotal);
+          setTotalViewers(initTotal);
+
+          // init created_at si absent côté getEvent
+          if (!createdAtRef.current && msg?.data?.event?.created_at) {
+            createdAtRef.current = msg.data.event.created_at;
+          }
+
           return;
         }
-        if (msg.type === 'init') {
-          lastMsgTsRef.current = Date.now();
-          sseBufferRef.current.lastState = msg.data.state;
-          setEvent(e => ({ ...e, state: msg.data.state }));
-          setHistory(msg.data.history);
-          setPreviousTotal(msg.data.state?.total || 0);
-          setTotalViewers(msg.data.state?.total || 0);
-        }
+
         if (msg.type === 'tick') {
-          lastMsgTsRef.current = Date.now();
-          // Bufferiser et flush avec throttling pour limiter les re-renders
+          // buffer
           sseBufferRef.current.lastState = {
             total: msg.data.total,
-            streams: Object.fromEntries(msg.data.streams.map(s => [s.id, s]))
+            streams: Object.fromEntries((msg.data.streams || []).map((s) => [s.id, s]))
           };
+
           sseBufferRef.current.totals.push({ ts: msg.data.ts, total: msg.data.total });
-          for (const s of msg.data.streams) {
+
+          for (const s of msg.data.streams || []) {
             const list = sseBufferRef.current.streams.get(s.id) || [];
             list.push({ ts: msg.data.ts, current: s.current });
             sseBufferRef.current.streams.set(s.id, list);
           }
-          const scheduleFlush = () => {
-            if (sseFlushTimerRef.current) return;
+
+          if (!sseFlushTimerRef.current) {
             sseFlushTimerRef.current = setTimeout(() => {
               sseFlushTimerRef.current = null;
+
               const buf = sseBufferRef.current;
-              // Mettre à jour état courant (cartes) et total affiché
+
+              // A) total + delta
               if (buf.lastState) {
-                setEvent(e => ({ ...e, state: buf.lastState }));
-                const sum = Object.values(buf.lastState.streams || {}).reduce((acc, s) => {
-                  const v = (typeof s.current === 'number' ? s.current : Number(s.current) || 0);
-                  return acc + v;
-                }, 0);
-                setTotalViewers(sum);
+                const newTotal =
+                  typeof buf.lastState.total === 'number'
+                    ? buf.lastState.total
+                    : Number(buf.lastState.total) || 0;
+
+                setPreviousTotal(lastTotalRef.current);
+                setTotalViewers(newTotal);
+                lastTotalRef.current = newTotal;
+
+                setEvent((prev) => (prev ? { ...prev, state: buf.lastState } : prev));
               }
-              // Historique total
+
+              // B) ajouter point au graphe (history)
               if (buf.totals.length) {
-                setHistory(h => {
-                  const next = h.concat(buf.totals);
-                  const cutoff = event?.created_at ? new Date(event.created_at).getTime() : 0;
-                  return next.filter(row => new Date(row.ts).getTime() >= cutoff);
+                setHistory((prev) => {
+                  const next = prev.concat(buf.totals);
+
+                  // couper par created_at si connu
+                  const cutoffMs = createdAtRef.current ? new Date(createdAtRef.current).getTime() : 0;
+                  const filtered = cutoffMs
+                    ? next.filter((row) => new Date(row.ts).getTime() >= cutoffMs)
+                    : next;
+
+                  const MAX = 5000;
+                  return filtered.length > MAX ? filtered.slice(filtered.length - MAX) : filtered;
                 });
                 buf.totals = [];
               }
-              // Historique par stream
+
+              // C) historique par stream
               if (buf.streams.size) {
-                setStreamsHistory(prev => {
-                  const cutoff = event?.created_at ? new Date(event.created_at).getTime() : 0;
+                setStreamsHistory((prev) => {
+                  const cutoffMs = createdAtRef.current ? new Date(createdAtRef.current).getTime() : 0;
                   const next = { ...prev };
+
                   for (const [sid, arrNew] of buf.streams.entries()) {
-                    const arr = next[sid] || [];
-                    next[sid] = arr.concat(arrNew).filter(row => new Date(row.ts).getTime() >= cutoff);
+                    const arrOld = next[sid] || [];
+                    const merged = arrOld.concat(arrNew);
+                    const filtered = cutoffMs
+                      ? merged.filter((row) => new Date(row.ts).getTime() >= cutoffMs)
+                      : merged;
+
+                    const MAX = 5000;
+                    next[sid] = filtered.length > MAX ? filtered.slice(filtered.length - MAX) : filtered;
                   }
                   return next;
                 });
                 buf.streams.clear();
               }
-              // Forcer le redraw du graphique total si disponible
+
+              // D) redraw chart
               try {
-                const chart = totalChartRef.current;
-                if (chart && typeof chart.update === 'function') chart.update('none');
+                const chart = getChartInstance(totalChartRef);
+                if (chart) chart.update('none');
               } catch {}
             }, SSE_THROTTLE_MS);
-          };
-          scheduleFlush();
+          }
         }
       };
+
+      // Heartbeat: si plus de messages, reconnect
+      sseMonitorTimerRef.current = setInterval(() => {
+        // si ton backend tick toutes les 10–20s, 35s est safe
+        const THRESHOLD_MS = 35000;
+        if (Date.now() - lastMsgTsRef.current > THRESHOLD_MS) {
+          try { esRef.current?.close(); } catch {}
+          esRef.current = null;
+          scheduleReconnect();
+        }
+      }, 5000);
     };
 
     setupES();
 
     const handleVisibility = () => {
       if (document.hidden) {
-        if (esRef.current) {
-          esRef.current.close();
-          esRef.current = null;
-        }
+        try { esRef.current?.close(); } catch {}
+        esRef.current = null;
       } else {
         setupES();
       }
     };
+
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
-      if (esRef.current) esRef.current.close();
-      if (sseFlushTimerRef.current) {
-        clearTimeout(sseFlushTimerRef.current);
-        sseFlushTimerRef.current = null;
-      }
-      if (sseMonitorTimerRef.current) {
-        clearInterval(sseMonitorTimerRef.current);
-        sseMonitorTimerRef.current = null;
-      }
+      cleanup();
     };
-  }, [id, event?.created_at]);
+  }, [id, API_BASE]);
 
-  // Charger l'historique JSON (incluant les streams) sur les dernières 24h
+  // 3) Charger l’historique JSON initial (fallback + streams) sans casser le live
   useEffect(() => {
     let aborted = false;
+
     (async () => {
       try {
         const url = `${API_BASE}/events/${id}/history?minutes=1440&streams=1&limit=5000`;
-        let res = await fetch(url);
-        if (!res.ok) return; // SSE init fera le fallback
+        const res = await fetch(url, { credentials: 'include' });
+        if (!res.ok) return;
+
         const ct = res.headers.get('content-type') || '';
-        // Si le serveur dev renvoie du HTML, refaire la requête directement sur :4000
-        if (!ct.includes('application/json')) {
-          if (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined') {
-            const direct = `${proto}//${host}:4000`;
-            res = await fetch(`${direct}/events/${id}/history?minutes=1440&streams=1&limit=5000`);
-            if (!res.ok) return;
-          } else {
-            return;
-          }
-        }
+        if (!ct.includes('application/json')) return;
+
         const data = await res.json();
         if (aborted) return;
+
         if (Array.isArray(data.history)) setHistory(data.history);
+
         if (Array.isArray(data.streams)) {
           const grouped = {};
           for (const row of data.streams) {
@@ -491,33 +628,46 @@ export default function Dashboard() {
           }
           setStreamsHistory(grouped);
         }
-      } catch (e) {
-        // silencieux: on garde l'affichage existant
-      }
+      } catch {}
     })();
-    return () => { aborted = true; };
-  }, [id, event?.created_at]);
+
+    return () => {
+      aborted = true;
+    };
+  }, [id, API_BASE]);
+
+  // 4) IMPORTANT: hook toujours appelé (fix React #310) + force redraw quand history change
+  useEffect(() => {
+    try {
+      const chart = getChartInstance(totalChartRef);
+      if (chart) chart.update('none');
+    } catch {}
+  }, [history]);
 
   if (!event) {
     return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #1e1b4b 0%, #0c2164ff 50%, #db2777 100%)',
-        color: 'white'
-      }}>
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'linear-gradient(135deg, #1e1b4b 0%, #0c2164ff 50%, #db2777 100%)',
+          color: 'white'
+        }}
+      >
         <div style={{ textAlign: 'center' }}>
-          <div style={{
-            width: '60px',
-            height: '60px',
-            border: '3px solid rgba(255,255,255,0.3)',
-            borderTopColor: '#f59e0b',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite',
-            margin: '0 auto 1rem'
-          }} />
+          <div
+            style={{
+              width: '60px',
+              height: '60px',
+              border: '3px solid rgba(255,255,255,0.3)',
+              borderTopColor: '#f59e0b',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              margin: '0 auto 1rem'
+            }}
+          />
           <div style={{ fontSize: '1.2rem', fontWeight: '500' }}>Chargement...</div>
         </div>
       </div>
@@ -526,7 +676,7 @@ export default function Dashboard() {
 
   const streamList = event.streams || [];
 
-  // Configuration du graphique avec style moderne
+  // Chart series
   const MAX_POINTS = 3000;
   const reduceSeries = (rows) => {
     if (!Array.isArray(rows)) return [];
@@ -536,19 +686,25 @@ export default function Dashboard() {
     for (let i = 0; i < rows.length; i += stride) out.push(rows[i]);
     return out;
   };
+
   const series = reduceSeries(history);
-  // Utiliser des points {x, y} pour une échelle temporelle fiable avec parsing désactivé
-  const seriesPoints = series.map(p => ({ x: new Date(p.ts), y: (typeof p.total === 'number' ? p.total : Number(p.total) || 0) }));
-  // Déterminer unité de temps et bornes selon la fenêtre choisie
+  const seriesPoints = series.map((p) => ({
+    x: new Date(p.ts),
+    y: typeof p.total === 'number' ? p.total : Number(p.total) || 0
+  }));
+
   const now = new Date();
+
   const computeEarliestTs = () => {
     let t = Infinity;
+
     if (Array.isArray(history) && history.length) {
       for (const row of history) {
         const ts = new Date(row.ts).getTime();
         if (ts < t) t = ts;
       }
     }
+
     for (const sid in streamsHistory) {
       const arr = streamsHistory[sid];
       if (Array.isArray(arr)) {
@@ -558,49 +714,52 @@ export default function Dashboard() {
         }
       }
     }
+
     if (!isFinite(t)) {
       if (event?.created_at) return new Date(event.created_at);
       return new Date(Date.now() - 3 * 60 * 60 * 1000);
     }
     return new Date(t);
   };
+
   const xMin = computeEarliestTs();
   const xMax = now;
+
   const totalMinutes = Math.max(1, Math.round((xMax.getTime() - xMin.getTime()) / 60000));
-  const timeUnit = totalMinutes >= 1440 ? 'day' : (totalMinutes >= 360 ? 'hour' : 'minute');
-  // Ne garder que les points dans la fenêtre visible pour éviter des axes trompeurs
-  const seriesVisiblePoints = seriesPoints.filter(p => p.x >= xMin && p.x <= xMax);
-  const data = {
-    datasets: [{
-      id: 'total',
-      label: 'Spectateurs',
-      data: seriesVisiblePoints,
-      borderColor: '#0c2164ff',
-      backgroundColor: 'rgba(139, 92, 246, 0.1)',
-      borderWidth: 3,
-      fill: true,
-      tension: 0.4,
-      pointBackgroundColor: '#0c2164ff',
-      pointBorderColor: '#ffffff',
-      pointBorderWidth: 0,
-      pointRadius: 0,
-      pointHoverRadius: 0
-    }]
-  };
-  
-  const visibleYs = seriesVisiblePoints.map(p => (typeof p.y === 'number' ? p.y : Number(p.y) || 0));
+  const timeUnit = totalMinutes >= 1440 ? 'day' : totalMinutes >= 360 ? 'hour' : 'minute';
+
+  const seriesVisiblePoints = seriesPoints.filter((p) => p.x >= xMin && p.x <= xMax);
+  const visibleYs = seriesVisiblePoints.map((p) => (typeof p.y === 'number' ? p.y : Number(p.y) || 0));
   const maxTotal = visibleYs.length ? Math.max(10, ...visibleYs) : 10;
   const minTotal = visibleYs.length ? Math.min(...visibleYs) : 0;
+
+  const data = {
+    datasets: [
+      {
+        id: 'total',
+        label: 'Spectateurs',
+        data: seriesVisiblePoints,
+        borderColor: '#0c2164ff',
+        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+        borderWidth: 3,
+        fill: true,
+        tension: 0.4,
+        pointBackgroundColor: '#0c2164ff',
+        pointBorderColor: '#ffffff',
+        pointBorderWidth: 0,
+        pointRadius: 0,
+        pointHoverRadius: 0
+      }
+    ]
+  };
+
   const options = {
     responsive: true,
     maintainAspectRatio: false,
     parsing: false,
-    // Ne pas normaliser: on veut afficher les valeurs réelles (pas 0..1)
     normalized: false,
     plugins: {
-      legend: {
-        display: false
-      },
+      legend: { display: false },
       tooltip: {
         backgroundColor: 'rgba(0, 0, 0, 0.8)',
         titleColor: '#ffffff',
@@ -637,54 +796,18 @@ export default function Dashboard() {
     spanGaps: true
   };
 
-  // Export helpers
-  const downloadDataUrl = (filename, dataUrl) => {
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-  // Export CSV local (2 colonnes: Heure, Total de spectateurs de l'events)
-  const exportTotalCsvLocal = (filename) => {
-    const header = "Heure,Total de spectateurs de l'events\n";
-    const rows = (Array.isArray(history) ? history : []).map(r => {
-      const heure = new Date(r.ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const total = (typeof r.total === 'number' ? r.total : Number(r.total) || 0);
-      return `${heure},${total}`;
-    });
-    const csv = header + rows.join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  // Forcer une mise à jour du graphique quand l'historique change
-  React.useEffect(() => {
-    try {
-      const chart = totalChartRef.current;
-      if (chart && typeof chart.update === 'function') chart.update('none');
-    } catch {}
-  }, [history]);
-
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #1e1b4b 0%, #0c2164ff 50%, #db2777 100%)',
-      color: 'white',
-      position: 'relative'
-    }}>
+    <div
+      style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #1e1b4b 0%, #0c2164ff 50%, #db2777 100%)',
+        color: 'white',
+        position: 'relative'
+      }}
+    >
       <ParticleSystem />
-      
+
       <div style={{ position: 'relative', zIndex: 10 }}>
-        {/* Bouton de retour */}
         <div style={{ padding: '1rem 2rem' }}>
           <Link
             to={`/admin/event/${id}`}
@@ -704,200 +827,263 @@ export default function Dashboard() {
               boxShadow: '0 4px 15px rgba(0,0,0,0.2)'
             }}
             onMouseEnter={(e) => {
-              e.target.style.transform = 'translateY(-2px)';
-              e.target.style.boxShadow = '0 8px 25px rgba(139, 92, 246, 0.3)';
+              const el = e.currentTarget;
+              el.style.transform = 'translateY(-2px)';
+              el.style.boxShadow = '0 8px 25px rgba(139, 92, 246, 0.3)';
             }}
             onMouseLeave={(e) => {
-              e.target.style.transform = 'translateY(0)';
-              e.target.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
+              const el = e.currentTarget;
+              el.style.transform = 'translateY(0)';
+              el.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
             }}
           >
-            ← Retour à l'évènement
+            ← Retour à l&apos;évènement
           </Link>
         </div>
 
-        {/* En-tête avec métriques principales */}
-        <div style={{
-          background: 'rgba(255, 255, 255, 0.1)',
-          backdropFilter: 'blur(10px)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
-          padding: '2rem 1rem',
-          textAlign: 'center'
-        }}>
+        <div
+          style={{
+            background: 'rgba(255, 255, 255, 0.1)',
+            backdropFilter: 'blur(10px)',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
+            padding: '2rem 1rem',
+            textAlign: 'center'
+          }}
+        >
           <div style={{ marginBottom: '1rem' }}>
             <img src={bsrqLogo} alt="BSRQ" style={{ height: '60px' }} />
           </div>
-          <h1 style={{ 
-            margin: '0 0 1rem 0', 
-            fontSize: '2.5rem', 
-            fontWeight: '700',
-            background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            backgroundClip: 'text'
-          }}>
-            📊 Dashboard Live
-          </h1>
-          
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%)',
-            backdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255,255,255,0.3)',
-            borderRadius: '20px',
-            padding: '2rem',
-            maxWidth: '400px',
-            margin: '0 auto',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
-          }}>
-            <div style={{ 
-              fontSize: '0.9rem', 
-              color: 'rgba(255,255,255,0.8)', 
-              marginBottom: '0.5rem',
-              textTransform: 'uppercase',
-              letterSpacing: '1px'
-            }}>
-              Total Spectateurs
-            </div>
-            <div style={{
-              fontSize: '3.5rem',
-              fontWeight: '800',
-              background: 'linear-gradient(45deg, #10b981, #3b82f6)',
+
+          <h1
+            style={{
+              margin: '0 0 1rem 0',
+              fontSize: '2.5rem',
+              fontWeight: '700',
+              background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-              lineHeight: '1'
-            }}>
-              {totalViewers?.toLocaleString() || 0}
+              backgroundClip: 'text'
+            }}
+          >
+            📊 Dashboard Live
+          </h1>
+
+          <div
+            style={{
+              background: 'linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255,255,255,0.3)',
+              borderRadius: '20px',
+              padding: '2rem',
+              maxWidth: '400px',
+              margin: '0 auto',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+            }}
+          >
+            <div
+              style={{
+                fontSize: '0.9rem',
+                color: 'rgba(255,255,255,0.8)',
+                marginBottom: '0.5rem',
+                textTransform: 'uppercase',
+                letterSpacing: '1px'
+              }}
+            >
+              Total Spectateurs
             </div>
-            {totalViewers > previousTotal && (
-              <div style={{ 
-                color: '#10b981', 
-                fontSize: '0.9rem', 
-                marginTop: '0.5rem',
-                animation: 'bounce 1s infinite'
-              }}>
-                📈 +{(totalViewers - previousTotal).toLocaleString()}
+
+            <div
+              style={{
+                fontSize: '3.5rem',
+                fontWeight: '800',
+                background: 'linear-gradient(45deg, #10b981, #3b82f6)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                lineHeight: '1'
+              }}
+            >
+              {Number(totalViewers || 0).toLocaleString()}
+            </div>
+
+            {Number(totalViewers || 0) !== Number(previousTotal || 0) && (
+              <div
+                style={{
+                  color: Number(totalViewers || 0) >= Number(previousTotal || 0) ? '#10b981' : '#ef4444',
+                  fontSize: '0.9rem',
+                  marginTop: '0.5rem',
+                  animation: 'bounce 1s infinite'
+                }}
+              >
+                {Number(totalViewers || 0) >= Number(previousTotal || 0)
+                  ? `📈 +${(Number(totalViewers || 0) - Number(previousTotal || 0)).toLocaleString()}`
+                  : `📉 ${(
+                      Number(totalViewers || 0) - Number(previousTotal || 0)
+                    ).toLocaleString()}`}
               </div>
             )}
           </div>
         </div>
 
-        {/* Contenu principal */}
         <div style={{ padding: '2rem 1rem' }}>
-          {/* Grille des streams */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: '1rem',
-            marginBottom: '2rem'
-          }}>
-            {streamList.map(s => {
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: '1rem',
+              marginBottom: '2rem'
+            }}
+          >
+            {streamList.map((s) => {
               const st = event.state?.streams?.[s.id];
               return (
-                <DynamicStreamCard 
-                  key={s.id} 
-                  label={s.label} 
-                  current={st?.current ?? 0} 
-                  online={st?.online ?? false} 
+                <DynamicStreamCard
+                  key={s.id}
+                  label={s.label}
+                  current={typeof st?.current === 'number' ? st.current : Number(st?.current) || 0}
+                  online={Boolean(st?.online)}
                 />
               );
             })}
           </div>
 
-          {/* Graphique total + export */}
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
-            backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: '20px',
-            padding: '2rem',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
-          }}>
-            <h3 style={{ 
-              margin: '0 0 1.5rem 0', 
-              fontSize: '1.5rem', 
-              fontWeight: '600',
-              background: 'linear-gradient(45deg, #0c2164ff, #3b82f6)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text'
-            }}>
+          <div
+            style={{
+              background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
+              backdropFilter: 'blur(10px)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '20px',
+              padding: '2rem',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+            }}
+          >
+            <h3
+              style={{
+                margin: '0 0 1.5rem 0',
+                fontSize: '1.5rem',
+                fontWeight: '600',
+                background: 'linear-gradient(45deg, #0c2164ff, #3b82f6)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text'
+              }}
+            >
               📈 Évolution Temps Réel
             </h3>
+
             <div style={{ height: '300px', position: 'relative' }}>
               <Line ref={totalChartRef} data={data} options={options} datasetIdKey="id" />
               {seriesVisiblePoints.length === 0 && (
-                <div style={{
-                  position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: 'rgba(255,255,255,0.9)', fontWeight: 600,
-                  background: 'linear-gradient(135deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.05) 100%)',
-                  borderRadius: '16px'
-                }}>
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'rgba(255,255,255,0.9)',
+                    fontWeight: 600,
+                    background: 'linear-gradient(135deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.05) 100%)',
+                    borderRadius: '16px'
+                  }}
+                >
                   Aucune donnée disponible sur la période.
                 </div>
               )}
             </div>
+
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 onClick={() => {
-                  const chart = totalChartRef.current;
+                  const chart = getChartInstance(totalChartRef);
                   if (chart) downloadDataUrl(`total_viewers_${id}.png`, chart.toBase64Image());
                 }}
                 style={{
                   background: 'linear-gradient(45deg, #10b981, #059669)',
-                  color: 'white', border: 'none', padding: '0.5rem 1rem',
-                  borderRadius: '10px', cursor: 'pointer'
+                  color: 'white',
+                  border: 'none',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '10px',
+                  cursor: 'pointer'
                 }}
               >
                 Exporter PNG
               </button>
+
               <button
-                onClick={() => {
-                  exportTotalCsvLocal(`event_${id}_total_viewers.csv`);
-                }}
+                onClick={() => exportTotalCsvLocal(`event_${id}_total_viewers.csv`)}
                 style={{
                   background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
-                  color: 'white', border: 'none', padding: '0.5rem 1rem',
-                  borderRadius: '10px', cursor: 'pointer'
+                  color: 'white',
+                  border: 'none',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '10px',
+                  cursor: 'pointer'
                 }}
               >
                 Exporter CSV (Heure, Total)
               </button>
+
               <button
                 onClick={async () => {
                   try {
-                    setJobExporting(true); setJobProgress(0); setJobId(null);
-                    const payload = (event?.created_at)
+                    setJobExporting(true);
+                    setJobProgress(0);
+                    setJobId(null);
+
+                    const payload = event?.created_at
                       ? { type: 'total', from: event.created_at, to: new Date().toISOString() }
                       : { type: 'total', minutes: 180 };
+
                     const res = await fetch(`${API_BASE}/events/${id}/export`, {
-                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
                       body: JSON.stringify(payload)
                     });
-                    const data = await res.json();
-                    if (!data.jobId) throw new Error('jobId manquant');
-                    setJobId(data.jobId);
+
+                    const json = await res.json();
+                    if (!json.jobId) throw new Error('jobId manquant');
+
+                    setJobId(json.jobId);
+
                     const poll = async () => {
-                      const sres = await fetch(`${API_BASE}/exports/${data.jobId}/status`);
+                      const sres = await fetch(`${API_BASE}/exports/${json.jobId}/status`, { credentials: 'include' });
                       const sdata = await sres.json();
+
                       if (sdata.status === 'done') {
                         setJobExporting(false);
-                        const url = `${API_BASE}/exports/${data.jobId}/download`;
-                        const a = document.createElement('a'); a.href = url; a.download = (event?.created_at ? `event_${id}_history_all.csv` : `event_${id}_history_180m.csv`); document.body.appendChild(a); a.click(); document.body.removeChild(a); return;
+                        const url = `${API_BASE}/exports/${json.jobId}/download`;
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = event?.created_at ? `event_${id}_history_all.csv` : `event_${id}_history_180m.csv`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        return;
                       }
-                      if (sdata.status === 'error') { setJobExporting(false); return; }
+
+                      if (sdata.status === 'error') {
+                        setJobExporting(false);
+                        return;
+                      }
+
                       setJobProgress(sdata.progress || 0);
                       setTimeout(poll, 1000);
                     };
+
                     poll();
-                  } catch (e) {
+                  } catch {
                     setJobExporting(false);
                   }
                 }}
                 style={{
                   background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
-                  color: 'white', border: 'none', padding: '0.5rem 1rem',
-                  borderRadius: '10px', cursor: 'pointer'
+                  color: 'white',
+                  border: 'none',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '10px',
+                  cursor: 'pointer'
                 }}
               >
                 {jobExporting ? `Job… ${jobProgress}` : 'Exporter CSV (async)'}
@@ -905,139 +1091,207 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Toggle graphs par stream */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
             <button
-              onClick={() => setShowStreamCharts(v => !v)}
+              onClick={() => setShowStreamCharts((v) => !v)}
               style={{
-                background: showStreamCharts ? 'linear-gradient(45deg, #ef4444, #f59e0b)' : 'linear-gradient(45deg, #10b981, #059669)',
-                color: 'white', border: 'none', padding: '0.5rem 1rem',
-                borderRadius: '10px', cursor: 'pointer'
+                background: showStreamCharts
+                  ? 'linear-gradient(45deg, #ef4444, #f59e0b)'
+                  : 'linear-gradient(45deg, #10b981, #059669)',
+                color: 'white',
+                border: 'none',
+                padding: '0.5rem 1rem',
+                borderRadius: '10px',
+                cursor: 'pointer'
               }}
             >
               {showStreamCharts ? 'Masquer les graphiques par stream' : 'Afficher les graphiques par stream'}
             </button>
           </div>
 
-          {/* Graphiques par stream + export */}
           {showStreamCharts && (event.streams || []).length > 0 && (
-            <div style={{
-              marginTop: '2rem',
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
-              backdropFilter: 'blur(10px)',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: '20px',
-              padding: '2rem',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
-            }}>
-              <h3 style={{ 
-                margin: '0 0 1.5rem 0', 
-                fontSize: '1.5rem', 
-                fontWeight: '600',
-                background: 'linear-gradient(45deg, #0c2164ff, #3b82f6)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text'
-              }}>
+            <div
+              style={{
+                marginTop: '2rem',
+                background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
+                backdropFilter: 'blur(10px)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '20px',
+                padding: '2rem',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+              }}
+            >
+              <h3
+                style={{
+                  margin: '0 0 1.5rem 0',
+                  fontSize: '1.5rem',
+                  fontWeight: '600',
+                  background: 'linear-gradient(45deg, #0c2164ff, #3b82f6)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text'
+                }}
+              >
                 📈 Par stream
               </h3>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-                gap: '1rem'
-              }}>
-                {(event.streams || []).map(stream => {
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                  gap: '1rem'
+                }}
+              >
+                {(event.streams || []).map((stream) => {
                   const rows = reduceSeries(streamsHistory[stream.id] || []);
-                  const points = rows.map(r => ({ x: new Date(r.ts), y: (typeof r.current === 'number' ? r.current : Number(r.current) || 0) }));
+                  const points = rows.map((r) => ({
+                    x: new Date(r.ts),
+                    y: typeof r.current === 'number' ? r.current : Number(r.current) || 0
+                  }));
+
                   const st = event.state?.streams?.[stream.id];
                   const sd = {
-                    datasets: [{
-                      label: stream.label,
-                      data: points,
-                      borderColor: st?.online ? '#10b981' : '#ef4444',
-                      backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                      borderWidth: 2,
-                      tension: 0.3,
-                      pointRadius: 0
-                    }]
+                    datasets: [
+                      {
+                        id: stream.id,
+                        label: stream.label,
+                        data: points,
+                        borderColor: st?.online ? '#10b981' : '#ef4444',
+                        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 0
+                      }
+                    ]
                   };
+
                   return (
-                    <div key={stream.id} style={{
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.2)',
-                      borderRadius: '12px',
-                      padding: '1rem'
-                    }}>
-                      <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: 'white' }}>🎬 {stream.label}</div>
-                      <div style={{ height: '200px' }}>
-                        <Line ref={el => (streamChartRefs.current[stream.id] = el)} data={sd} options={{ ...options, maintainAspectRatio: false }} />
+                    <div
+                      key={stream.id}
+                      style={{
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        borderRadius: '12px',
+                        padding: '1rem'
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: 'white' }}>
+                        🎬 {stream.label}
                       </div>
+
+                      <div style={{ height: '200px' }}>
+                        <Line
+                          ref={(el) => {
+                            streamChartRefs.current[stream.id] = el;
+                          }}
+                          data={sd}
+                          options={{ ...options, maintainAspectRatio: false }}
+                          datasetIdKey="id"
+                        />
+                      </div>
+
                       <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                         <button
                           onClick={() => {
-                            const chart = streamChartRefs.current[stream.id];
-                            if (chart) downloadDataUrl(`${stream.label.replace(/\s+/g,'_')}_viewers_${id}.png`, chart.toBase64Image());
+                            const refObj = { current: streamChartRefs.current[stream.id] };
+                            const chart = getChartInstance(refObj);
+                            if (chart) {
+                              downloadDataUrl(
+                                `${stream.label.replace(/\s+/g, '_')}_viewers_${id}.png`,
+                                chart.toBase64Image()
+                              );
+                            }
                           }}
                           style={{
                             background: 'linear-gradient(45deg, #10b981, #059669)',
-                            color: 'white', border: 'none', padding: '0.4rem 0.8rem',
-                            borderRadius: '8px', cursor: 'pointer'
+                            color: 'white',
+                            border: 'none',
+                            padding: '0.4rem 0.8rem',
+                            borderRadius: '8px',
+                            cursor: 'pointer'
                           }}
                         >
                           PNG
                         </button>
+
                         <button
                           onClick={() => {
                             const nowIso = new Date().toISOString();
-                            const url = (event?.created_at)
-                              ? `${API_BASE}/events/${id}/streams/${stream.id}/history.csv?from=${encodeURIComponent(event.created_at)}&to=${encodeURIComponent(nowIso)}`
+                            const url = event?.created_at
+                              ? `${API_BASE}/events/${id}/streams/${stream.id}/history.csv?from=${encodeURIComponent(
+                                  event.created_at
+                                )}&to=${encodeURIComponent(nowIso)}`
                               : `${API_BASE}/events/${id}/streams/${stream.id}/history.csv?minutes=180`;
+
                             const a = document.createElement('a');
                             a.href = url;
-                            a.download = (event?.created_at)
-                              ? `${stream.label.replace(/\s+/g,'_')}_viewers_${id}_all.csv`
-                              : `${stream.label.replace(/\s+/g,'_')}_viewers_${id}_180m.csv`;
+                            a.download = event?.created_at
+                              ? `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_all.csv`
+                              : `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_180m.csv`;
                             document.body.appendChild(a);
                             a.click();
                             document.body.removeChild(a);
                           }}
                           style={{
                             background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
-                            color: 'white', border: 'none', padding: '0.4rem 0.8rem',
-                            borderRadius: '8px', cursor: 'pointer'
+                            color: 'white',
+                            border: 'none',
+                            padding: '0.4rem 0.8rem',
+                            borderRadius: '8px',
+                            cursor: 'pointer'
                           }}
                         >
                           CSV
                         </button>
+
                         <button
                           onClick={async () => {
                             try {
-                              const payload = (event?.created_at)
+                              const payload = event?.created_at
                                 ? { type: 'stream', sid: stream.id, from: event.created_at, to: new Date().toISOString() }
                                 : { type: 'stream', sid: stream.id, minutes: 180 };
+
                               const res = await fetch(`${API_BASE}/events/${id}/export`, {
-                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
                                 body: JSON.stringify(payload)
                               });
-                              const data = await res.json();
-                              if (!data.jobId) return;
+
+                              const json = await res.json();
+                              if (!json.jobId) return;
+
                               const poll = async () => {
-                                const sres = await fetch(`${API_BASE}/exports/${data.jobId}/status`);
+                                const sres = await fetch(`${API_BASE}/exports/${json.jobId}/status`, { credentials: 'include' });
                                 const sdata = await sres.json();
+
                                 if (sdata.status === 'done') {
-                                  const url = `${API_BASE}/exports/${data.jobId}/download`;
-                                  const a = document.createElement('a'); a.href = url; a.download = (event?.created_at ? `${stream.label.replace(/\s+/g,'_')}_viewers_${id}_all.csv` : `${stream.label.replace(/\s+/g,'_')}_viewers_${id}_180m.csv`); document.body.appendChild(a); a.click(); document.body.removeChild(a); return;
+                                  const url = `${API_BASE}/exports/${json.jobId}/download`;
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = event?.created_at
+                                    ? `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_all.csv`
+                                    : `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_180m.csv`;
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  document.body.removeChild(a);
+                                  return;
                                 }
-                                if (sdata.status === 'error') { return; }
+
+                                if (sdata.status === 'error') return;
                                 setTimeout(poll, 1000);
                               };
+
                               poll();
                             } catch {}
                           }}
                           style={{
                             background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
-                            color: 'white', border: 'none', padding: '0.4rem 0.8rem',
-                            borderRadius: '8px', cursor: 'pointer'
+                            color: 'white',
+                            border: 'none',
+                            padding: '0.4rem 0.8rem',
+                            borderRadius: '8px',
+                            cursor: 'pointer'
                           }}
                         >
                           Job
@@ -1052,31 +1306,26 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Animations CSS */}
       <style>{`
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-        
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
         }
-        
         @keyframes bounce {
           0%, 20%, 53%, 80%, 100% { transform: translateY(0); }
           40%, 43% { transform: translateY(-8px); }
           70% { transform: translateY(-4px); }
           90% { transform: translateY(-2px); }
         }
-        
         @keyframes glow {
           0% { text-shadow: 0 0 5px rgba(19, 48, 110, 0.8); }
           50% { text-shadow: 0 0 20px rgba(19, 48, 110, 0.8); }
           100% { text-shadow: 0 0 5px rgba(19, 48, 110, 0.5); }
         }
-        
         @keyframes shine {
           0% { left: -100%; }
           100% { left: 100%; }
