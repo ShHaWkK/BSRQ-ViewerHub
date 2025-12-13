@@ -58,6 +58,7 @@ export default function Login({ forceAud, forceRedirect }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
+        credentials: 'same-origin'
       });
       if (!res.ok) {
         setError('Mot de passe invalide');
@@ -71,7 +72,8 @@ export default function Login({ forceAud, forceRedirect }) {
         } catch {
           target = redirectParam;
         }
-        navigate(target, { replace: true });
+        // Force un rechargement complet pour éviter toute condition de course de cookie
+        window.location.assign(target);
       }
     } catch {
       setError('Erreur réseau');

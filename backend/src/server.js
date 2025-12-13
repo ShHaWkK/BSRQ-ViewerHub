@@ -13,6 +13,8 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 app.use(cors({ origin: process.env.FRONTEND_ORIGIN }));
+// Faire confiance au proxy pour X-Forwarded-* (HTTPS derrière Nginx)
+app.set('trust proxy', 1);
 
 // Rate limit simple pour endpoints admin
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
@@ -73,13 +75,13 @@ function getCookie(req, name) {
   return '';
 }
 
-function setAuthCookie(res, token) {
-  // Paramètres de cookie prudents
-  const isProd = process.env.NODE_ENV === 'production';
+function setAuthCookie(res, token, req) {
+  // Paramètres de cookie prudents et compatibles HTTPS derrière proxy
+  const viaHttps = (req?.secure) || (req?.headers?.['x-forwarded-proto'] === 'https');
   const maxAgeSec = 60 * 60 * 24 * 60; // 60 jours
   res.cookie('auth', token, {
     httpOnly: true,
-    secure: isProd,
+    secure: !!viaHttps,
     sameSite: 'lax',
     maxAge: maxAgeSec * 1000,
     path: '/',
@@ -112,7 +114,7 @@ app.post('/auth/login', (req, res) => {
   else if (CLIENT_PASSWORD && password === CLIENT_PASSWORD) aud = 'client';
   else return res.status(401).json({ ok: false });
   const token = createToken({ aud });
-  setAuthCookie(res, token);
+  setAuthCookie(res, token, req);
   res.json({ ok: true, aud });
 });
 
@@ -123,7 +125,7 @@ app.get('/auth/magic', (req, res) => {
   if (!payload) return res.status(401).json({ ok: false, error: 'invalid' });
   const aud = payload.aud || 'admin';
   const red = isSafeRedirect(redirect) ? redirect : (aud === 'client' ? '/events' : '/admin');
-  setAuthCookie(res, createToken({ aud }, Math.max(60, payload.exp - Math.floor(Date.now()/1000))));
+  setAuthCookie(res, createToken({ aud }, Math.max(60, payload.exp - Math.floor(Date.now()/1000))), req);
   res.redirect(red);
 });
 
@@ -137,7 +139,9 @@ app.post('/auth/magic', (req, res) => {
   const id = genId();
   const exp = Date.now() + ttl * 1000;
   magicAliases.set(id, { token, aud: audience, redirect, exp, used: false });
-  const base = process.env.FRONTEND_PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+  const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'http');
+  const host = req.get('host') || (process.env.FRONTEND_PUBLIC_URL ? new URL(process.env.FRONTEND_PUBLIC_URL).host : 'localhost');
+  const base = `${proto}://${host}`.replace(/\/+$/, '');
   const url = `${base}/m/${id}`;
   res.json({ url });
 });
@@ -151,7 +155,7 @@ app.get('/m/:id', (req, res) => {
   const payload = verifyToken(rec.token);
   if (!payload) return res.status(401).send('Token invalide');
   const aud = payload.aud || rec.aud || 'admin';
-  setAuthCookie(res, createToken({ aud }, Math.floor((rec.exp - Date.now())/1000)));
+  setAuthCookie(res, createToken({ aud }, Math.floor((rec.exp - Date.now())/1000)), req);
   const red = isSafeRedirect(rec.redirect) ? rec.redirect : (aud === 'client' ? '/events' : '/admin');
   res.redirect(red);
 });
