@@ -473,7 +473,13 @@ export default function EventDetail() {
           setForm(prev => ({ ...prev, label: title }));
         }
       } catch (e) {
-        // silencieux: l'auto-complétion est best-effort
+        // Fallback: si l'API YouTube n'est pas dispo, proposer un label basé sur l'ID
+        const vid = extractVideoIdClient(raw);
+        if (vid && (!form.label || form.label === lastAutoTitleRef.current)) {
+          const fallback = `Vidéo: ${vid}`;
+          lastAutoTitleRef.current = fallback;
+          setForm(prev => ({ ...prev, label: fallback }));
+        }
       }
     }, 600);
     return () => {
@@ -939,3 +945,16 @@ export default function EventDetail() {
     </div>
   );
 };
+// Fallback local: extraire un ID vidéo depuis URL/ID
+function extractVideoIdClient(input) {
+  if (!input) return null;
+  const regexList = [
+    /(?:v=|\/videos\/|embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+    /^([a-zA-Z0-9_-]{11})$/
+  ];
+  for (const r of regexList) {
+    const m = input.match(r);
+    if (m && m[1]) return m[1];
+  }
+  return null;
+}

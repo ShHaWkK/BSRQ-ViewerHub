@@ -415,6 +415,10 @@ app.get('/youtube/title/:input', async (req, res) => {
     const raw = decodeURIComponent(req.params.input || '');
     const videoId = extractVideoId(raw);
     if (!videoId) return res.status(400).json({ error: 'invalid_video_id' });
+    if (!process.env.YT_API_KEY) {
+      // Clé API manquante: signaler explicitement pour faciliter la config
+      return res.status(500).json({ error: 'api_key_missing' });
+    }
     const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${process.env.YT_API_KEY}`;
     let json;
     try {
@@ -438,11 +442,16 @@ app.get('/events/:id/stream', async (req, res) => {
     const MAX_HISTORY_MINUTES = parseInt(process.env.MAX_HISTORY_MINUTES || '10080'); // 7 jours par défaut
     const minutesRaw = String(req.query.minutes || '60');
     const minutesInt = Math.max(1, Math.min(MAX_HISTORY_MINUTES, parseInt(minutesRaw, 10) || 60));
+    // Headers SSE + anti-buffering pour Nginx/Reverse proxies
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
-      Connection: 'keep-alive'
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no'
     });
+    if (typeof res.flushHeaders === 'function') {
+      try { res.flushHeaders(); } catch {}
+    }
     res.write('\n');
     const set = clients.get(ev.id) || new Set();
     set.add(res);

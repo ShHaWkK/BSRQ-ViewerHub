@@ -305,7 +305,7 @@ export default function Dashboard() {
   const esRef = useRef(null);
   const sseFlushTimerRef = useRef(null);
   const sseBufferRef = useRef({ totals: [], streams: new Map(), lastState: null });
-  const SSE_THROTTLE_MS = 1000; // 1s
+  const SSE_THROTTLE_MS = 250; // rafraîchissement plus réactif
 
   useEffect(() => {
     getEvent(id).then(ev => {
@@ -321,7 +321,10 @@ export default function Dashboard() {
       }
       // Afficher par défaut les dernières 24h pour voir les variations quotidiennes
       const params = `minutes=1440`;
-      esRef.current = new EventSource(`${API_BASE.replace(/\/+$/, '')}/events/${id}/stream?${params}`);
+      const base = API_BASE;
+      const url = `${String(base).replace(/\/+$/, '')}/events/${id}/stream?${params}`;
+      const useCreds = (typeof base === 'string' && base.startsWith('/'));
+      esRef.current = new EventSource(url, useCreds ? { withCredentials: true } : undefined);
       // Fallback automatique en cas d'erreur (ex: proxy dev renvoyant du HTML)
       esRef.current.onerror = () => {
         try {
