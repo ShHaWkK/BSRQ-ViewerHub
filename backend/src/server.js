@@ -162,8 +162,8 @@ app.get('/m/:id', (req, res) => {
 
 async function init() {
   await migrate();
-  // Charger les évènements existants
-  const { rows: evs } = await pool.query('SELECT * FROM events');
+  // Charger les évènements existants (exclure ceux supprimés)
+  const { rows: evs } = await pool.query("SELECT * FROM events WHERE COALESCE(is_deleted, FALSE) = FALSE");
   for (const ev of evs) {
     ev.streams = (await pool.query('SELECT * FROM streams WHERE event_id=$1', [ev.id])).rows;
     // Initialiser les propriétés par défaut si elles n'existent pas
@@ -318,13 +318,53 @@ app.post('/events', async (req, res) => {
 });
 
 app.get('/events', (req, res) => {
-  res.json(Array.from(events.values()).map(e => ({ id: e.id, name: e.name, pollIntervalSec: e.poll_interval_ms / 1000 })));
+  res.json(Array.from(events.values()).map(e => ({ id: e.id, name: e.name, pollIntervalSec: e.poll_interval_ms / 1000, is_paused: !!e.is_paused })));
 });
 
 app.get('/events/:id', (req, res) => {
   try {
     const ev = getEvent(req.params.id);
-    res.json({ id: ev.id, name: ev.name, pollIntervalSec: ev.poll_interval_ms / 1000, streams: ev.streams, state: ev.state });
+    res.json({ id: ev.id, name: ev.name, pollIntervalSec: ev.poll_interval_ms / 1000, streams: ev.streams, state: ev.state, is_paused: !!ev.is_paused });
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Mettre à jour un événement (nom + intervalle de polling)
+app.put('/events/:id', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    const { name, pollIntervalSec } = req.body || {};
+    const newName = (name || ev.name).toString();
+    const intervalMs = Math.max(2, parseInt(pollIntervalSec || ev.poll_interval_ms / 1000)) * 1000;
+    await pool.query('UPDATE events SET name=$1, poll_interval_ms=$2 WHERE id=$3', [newName, intervalMs, ev.id]);
+    ev.name = newName;
+    ev.poll_interval_ms = intervalMs;
+    // redémarrer le polling avec le nouvel intervalle
+    if (ev.timer) clearInterval(ev.timer);
+    startPolling(ev.id);
+    res.json({ id: ev.id, name: ev.name, pollIntervalSec: ev.poll_interval_ms / 1000 });
+  } catch {
+    res.status(404).end();
+  }
+});
+
+// Suppression (soft-delete) d'un évènement
+app.delete('/events/:id', async (req, res) => {
+  try {
+    const ev = getEvent(req.params.id);
+    await pool.query('UPDATE events SET is_deleted=TRUE, deleted_at=NOW() WHERE id=$1', [ev.id]);
+    // arrêter le polling et fermer les clients SSE
+    if (ev.timer) clearInterval(ev.timer);
+    const set = clients.get(ev.id);
+    if (set) {
+      for (const resSse of set) {
+        try { resSse.end(); } catch {}
+      }
+      clients.delete(ev.id);
+    }
+    events.delete(ev.id);
+    res.json({ ok: true });
   } catch {
     res.status(404).end();
   }

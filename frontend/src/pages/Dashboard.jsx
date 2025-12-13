@@ -327,7 +327,8 @@ export default function Dashboard() {
         ? `${proto}//${host}:4000`
         : API_BASE;
       const url = `${String(base).replace(/\/+$/, '')}/events/${id}/stream?${params}`;
-      esRef.current = new EventSource(url, { withCredentials: true });
+      const withCreds = (typeof base === 'string' && base.startsWith('/'));
+      esRef.current = new EventSource(url, withCreds ? { withCredentials: true } : undefined);
       esRef.current.onopen = () => {
         sseReconnectAttemptRef.current = 0;
       };

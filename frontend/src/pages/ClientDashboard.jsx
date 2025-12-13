@@ -59,8 +59,9 @@ export default function ClientDashboard() {
       const base = (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined')
         ? `${proto}//${host}:4000`
         : API_BASE;
-      const url = `${String(base).replace(/\/\/+$/, '')}/events/${id}/stream?${params}`;
-      esRef.current = new EventSource(url, { withCredentials: true });
+      const url = `${String(base).replace(/\/+$/, '')}/events/${id}/stream?${params}`;
+      const withCreds = (typeof base === 'string' && base.startsWith('/'));
+      esRef.current = new EventSource(url, withCreds ? { withCredentials: true } : undefined);
       esRef.current.onopen = () => { sseReconnectAttemptRef.current = 0; };
       esRef.current.onerror = () => {
         try { if (esRef.current) { esRef.current.close(); esRef.current = null; } } catch {}

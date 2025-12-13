@@ -230,6 +230,8 @@ export default function LiveViewer() {
   const [event, setEvent] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const esRef = useRef(null);
+  const sseReconnectAttemptRef = useRef(0);
+  const sseReconnectTimerRef = useRef(null);
 
   useEffect(() => {
     getEvent(id)
@@ -242,19 +244,29 @@ export default function LiveViewer() {
         setIsLoading(false);
       });
     
-    // Connexion SSE pour les données en temps réel
+    // Connexion SSE pour les données en temps réel, avec reconnexion exponentielle
     const setupES = () => {
-      if (esRef.current) { esRef.current.close(); esRef.current = null; }
+      if (esRef.current) { try { esRef.current.close(); } catch {} esRef.current = null; }
       const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
       const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
       let base = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
       if (typeof base === 'string' && base.startsWith('/') && typeof window !== 'undefined') {
         const port = window.location.port;
-        if (port === '3019') {
+        const devPorts = new Set(['3000', '3001', '3019']);
+        if (devPorts.has(port)) {
           base = `${proto}//${host}:4000`;
         }
       }
-      esRef.current = new EventSource(`${base.replace(/\/+$/, '')}/events/${id}/stream`);
+      const url = `${String(base).replace(/\/+$/, '')}/events/${id}/stream`;
+      esRef.current = new EventSource(url, { withCredentials: true });
+      esRef.current.onopen = () => { sseReconnectAttemptRef.current = 0; };
+      esRef.current.onerror = () => {
+        try { if (esRef.current) { esRef.current.close(); esRef.current = null; } } catch {}
+        const backoff = Math.min(30000, 1000 * Math.pow(2, sseReconnectAttemptRef.current || 0));
+        sseReconnectAttemptRef.current = (sseReconnectAttemptRef.current || 0) + 1;
+        if (sseReconnectTimerRef.current) { clearTimeout(sseReconnectTimerRef.current); sseReconnectTimerRef.current = null; }
+        sseReconnectTimerRef.current = setTimeout(() => setupES(), backoff);
+      };
       esRef.current.onmessage = ev => {
         const raw = ev.data;
         if (!raw || raw[0] !== '{') return;
@@ -277,7 +289,8 @@ export default function LiveViewer() {
     setupES();
     const onVis = () => {
       if (document.hidden) {
-        if (esRef.current) { esRef.current.close(); esRef.current = null; }
+        try { if (esRef.current) esRef.current.close(); } catch {}
+        esRef.current = null;
       } else {
         setupES();
       }
@@ -286,7 +299,9 @@ export default function LiveViewer() {
     
     return () => {
       document.removeEventListener('visibilitychange', onVis);
-      if (esRef.current) esRef.current.close();
+      try { if (esRef.current) esRef.current.close(); } catch {}
+      esRef.current = null;
+      if (sseReconnectTimerRef.current) { clearTimeout(sseReconnectTimerRef.current); sseReconnectTimerRef.current = null; }
     };
   }, [id]);
 
