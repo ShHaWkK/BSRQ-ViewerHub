@@ -150,7 +150,7 @@ const DynamicStreamCard = ({ label, current, online }) => {
     if (cur !== displayViewers) {
       setIsAnimating(true);
 
-      const duration = 700;
+      const duration = 650;
       const startTime = Date.now();
       const startValue = displayViewers;
       const targetValue = cur;
@@ -163,11 +163,8 @@ const DynamicStreamCard = ({ label, current, online }) => {
         const v = Math.round(startValue + (targetValue - startValue) * eased);
         setDisplayViewers(v);
 
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        } else {
-          setIsAnimating(false);
-        }
+        if (progress < 1) requestAnimationFrame(animate);
+        else setIsAnimating(false);
       };
 
       animate();
@@ -269,7 +266,7 @@ const DynamicStreamCard = ({ label, current, online }) => {
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
-            animation: isAnimating ? 'glow 0.5s ease-in-out' : 'none',
+            animation: isAnimating ? 'glow 0.45s ease-in-out' : 'none',
           }}
         >
           {displayViewers?.toLocaleString() || 0}
@@ -302,7 +299,7 @@ const DynamicStreamCard = ({ label, current, online }) => {
               : 'linear-gradient(90deg, #6b7280, #9ca3af)',
             borderRadius: '2px',
             width: `${Math.min(100, (displayViewers / 50000) * 100)}%`,
-            transition: 'width 1s cubic-bezier(0.4, 0, 0.2, 1)',
+            transition: 'width 350ms cubic-bezier(0.4, 0, 0.2, 1)',
             boxShadow: online ? '0 0 10px rgba(16, 185, 129, 0.5)' : 'none',
           }}
         />
@@ -312,13 +309,35 @@ const DynamicStreamCard = ({ label, current, online }) => {
 };
 
 /* --------------------------
-   Helpers chart ref
+   Helpers
 --------------------------- */
+const safeNum = (v, d = 0) => {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : d;
+};
+
 const getChartInstance = (refObj) => {
   const r = refObj?.current;
   if (!r) return null;
-  // react-chartjs-2 versions differ: sometimes ref is chart instance, sometimes { chart }
-  return r.chart || r;
+  return r.chart || r; // react-chartjs-2 compat
+};
+
+// Append 1 point, avoid duplicates, keep last MAX points
+const appendPoint = (arr, p, MAX = 5000) => {
+  const out = Array.isArray(arr) ? arr.slice() : [];
+  if (!p || !p.ts) return out;
+
+  const ts = new Date(p.ts).toISOString();
+  const last = out[out.length - 1];
+
+  if (last && new Date(last.ts).toISOString() === ts) {
+    out[out.length - 1] = { ...last, ...p, ts };
+  } else {
+    out.push({ ...p, ts });
+  }
+
+  if (out.length > MAX) out.splice(0, out.length - MAX);
+  return out;
 };
 
 /* --------------------------
@@ -327,24 +346,16 @@ const getChartInstance = (refObj) => {
 export default function Dashboard() {
   const { id } = useParams();
 
-  const host =
-    typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-  const proto =
-    typeof window !== 'undefined' ? window.location.protocol : 'http:';
+  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+  const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
 
   let API_BASE = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
 
-  // Dev proxy fallback: si API_BASE est relative, basculer SSE/Fetch vers :4000 en dev ports
-  if (
-    typeof API_BASE === 'string' &&
-    API_BASE.startsWith('/') &&
-    typeof window !== 'undefined'
-  ) {
+  // Dev proxy fallback: si API_BASE est relative, basculer vers :4000 sur ports dev
+  if (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined') {
     const port = window.location.port;
     const devPorts = new Set(['3000', '3001', '3019']);
-    if (devPorts.has(port)) {
-      API_BASE = `${proto}//${host}:4000`;
-    }
+    if (devPorts.has(port)) API_BASE = `${proto}//${host}:4000`;
   }
 
   const SSE_BASE =
@@ -353,8 +364,13 @@ export default function Dashboard() {
       : API_BASE;
 
   const [event, setEvent] = useState(null);
+
+  // history total: [{ts, total}]
   const [history, setHistory] = useState([]);
+
+  // streamsHistory: { [sid]: [{ts, current}] }
   const [streamsHistory, setStreamsHistory] = useState({});
+
   const [showStreamCharts, setShowStreamCharts] = useState(false);
 
   const [totalViewers, setTotalViewers] = useState(0);
@@ -364,50 +380,175 @@ export default function Dashboard() {
   const [jobProgress, setJobProgress] = useState(0);
   const [jobId, setJobId] = useState(null);
 
+  const [sseStatus, setSseStatus] = useState('connecting'); // connecting | live | reconnecting | down
+
   const totalChartRef = useRef(null);
   const streamChartRefs = useRef({});
 
   const esRef = useRef(null);
-  const sseFlushTimerRef = useRef(null);
-  const sseMonitorTimerRef = useRef(null);
-  const lastMsgTsRef = useRef(Date.now());
+  const pollTimerRef = useRef(null);
+  const sseReconnectTimerRef = useRef(null);
 
+  const lastMsgTsRef = useRef(Date.now());
   const createdAtRef = useRef(null);
-  const pollIntervalSecRef = useRef(60);
+  const pollIntervalSecRef = useRef(2); // fallback poll live (2s)
   const lastTotalRef = useRef(0);
 
-  const sseBufferRef = useRef({
-    totals: [],
-    streams: new Map(),
+  const SSE_THROTTLE_MS = 120; // plus agressif = plus "live"
+  const MAX_POINTS = 5000; // total history points
+  const MAX_POINTS_STREAM = 3000;
+
+  const flushTimerRef = useRef(null);
+  const bufferRef = useRef({
     lastState: null,
+    totalPoints: [],
+    streamPoints: new Map(), // sid -> [{ts,current}]
   });
 
-  // Rend le live "visible" sans saturer React
-  const SSE_THROTTLE_MS = 250;
-
-  // IMPORTANT: downsampling qui garde TOUJOURS le dernier point (sinon le graphe “s’arrête”)
-  const MAX_POINTS = 3000;
-  const reduceSeries = (rows) => {
+  const reduceSeries = (rows, MAX = 3000) => {
     if (!Array.isArray(rows)) return [];
-    if (rows.length <= MAX_POINTS) return rows;
+    if (rows.length <= MAX) return rows;
 
-    const stride = Math.ceil(rows.length / MAX_POINTS);
+    const stride = Math.ceil(rows.length / MAX);
     const out = [];
     for (let i = 0; i < rows.length; i += stride) out.push(rows[i]);
 
     const last = rows[rows.length - 1];
     if (out[out.length - 1] !== last) out.push(last);
-
     return out;
   };
 
+  const cleanupSSE = () => {
+    try {
+      if (esRef.current) esRef.current.close();
+    } catch {}
+    esRef.current = null;
+
+    if (sseReconnectTimerRef.current) {
+      clearTimeout(sseReconnectTimerRef.current);
+      sseReconnectTimerRef.current = null;
+    }
+
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+  };
+
+  const cleanupPoll = () => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimerRef.current) return;
+
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
+
+      const buf = bufferRef.current;
+
+      // 1) push state live
+      if (buf.lastState) {
+        setEvent((prev) => (prev ? { ...prev, state: buf.lastState } : prev));
+
+        // TOTAL: priorité au total backend (vrai temps réel)
+        const total = safeNum(buf.lastState.total, 0);
+
+        setPreviousTotal(lastTotalRef.current);
+        setTotalViewers(total);
+        lastTotalRef.current = total;
+      }
+
+      // cutoff created_at
+      const cutoff = createdAtRef.current ? new Date(createdAtRef.current).getTime() : 0;
+
+      // 2) total points
+      if (buf.totalPoints.length) {
+        setHistory((prev) => {
+          let next = Array.isArray(prev) ? prev : [];
+          for (const p of buf.totalPoints) {
+            const tsMs = new Date(p.ts).getTime();
+            if (cutoff && tsMs < cutoff) continue;
+            next = appendPoint(next, p, MAX_POINTS);
+          }
+          buf.totalPoints = [];
+          return next;
+        });
+      }
+
+      // 3) stream points
+      if (buf.streamPoints.size) {
+        setStreamsHistory((prev) => {
+          const next = { ...(prev || {}) };
+
+          for (const [sid, pts] of buf.streamPoints.entries()) {
+            let arr = Array.isArray(next[sid]) ? next[sid] : [];
+            for (const p of pts) {
+              const tsMs = new Date(p.ts).getTime();
+              if (cutoff && tsMs < cutoff) continue;
+              arr = appendPoint(arr, p, MAX_POINTS_STREAM);
+            }
+            next[sid] = arr;
+          }
+          buf.streamPoints.clear();
+          return next;
+        });
+      }
+
+      // 4) force chart update (certaines versions react-chartjs-2)
+      try {
+        const chart = getChartInstance(totalChartRef);
+        if (chart && typeof chart.update === 'function') chart.update('none');
+      } catch {}
+    }, SSE_THROTTLE_MS);
+  };
+
+  const pushTick = ({ ts, total, streamsArr }) => {
+    const t = ts || new Date().toISOString();
+    const tot = safeNum(total, 0);
+
+    // state buffer
+    const streamsObj = Object.fromEntries(
+      (Array.isArray(streamsArr) ? streamsArr : []).map((s) => [
+        s.id,
+        {
+          id: s.id,
+          current: safeNum(s.current, 0),
+          online: !!s.online,
+        },
+      ])
+    );
+
+    bufferRef.current.lastState = {
+      total: tot,
+      streams: streamsObj,
+    };
+
+    // points buffer
+    bufferRef.current.totalPoints.push({ ts: t, total: tot });
+
+    if (Array.isArray(streamsArr)) {
+      for (const s of streamsArr) {
+        const sid = s.id;
+        if (!sid) continue;
+        const list = bufferRef.current.streamPoints.get(sid) || [];
+        list.push({ ts: t, current: safeNum(s.current, 0) });
+        bufferRef.current.streamPoints.set(sid, list);
+      }
+    }
+
+    scheduleFlush();
+  };
+
   /* --------------------------
-     Load event + SSE live stream
+     Boot: load event + initial history (1 shot)
   --------------------------- */
   useEffect(() => {
     let cancelled = false;
 
-    // 1) Charger l’event (info + état initial)
     (async () => {
       try {
         const ev = await getEvent(id);
@@ -416,76 +557,89 @@ export default function Dashboard() {
         setEvent(ev);
 
         createdAtRef.current = ev?.created_at || null;
-        pollIntervalSecRef.current =
-          (ev?.pollIntervalSec && Number(ev.pollIntervalSec)) || 60;
 
-        const initialTotal =
-          typeof ev?.state?.total === 'number'
-            ? ev.state.total
-            : Number(ev?.state?.total) || 0;
-
+        // total initial
+        const initialTotal = safeNum(ev?.state?.total, 0);
         lastTotalRef.current = initialTotal;
         setPreviousTotal(initialTotal);
         setTotalViewers(initialTotal);
+
+        // load initial history
+        try {
+          const url = `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/history?minutes=1440&streams=1&limit=5000`;
+          const res = await fetch(url, { credentials: 'include' });
+          if (res.ok) {
+            const data = await res.json();
+            if (cancelled) return;
+
+            if (Array.isArray(data.history)) setHistory(data.history);
+
+            if (Array.isArray(data.streams)) {
+              const grouped = {};
+              for (const row of data.streams) {
+                const sid = row.stream_id;
+                const arr = grouped[sid] || [];
+                arr.push({ ts: row.ts, current: row.concurrent_viewers });
+                grouped[sid] = arr;
+              }
+              setStreamsHistory(grouped);
+            }
+          }
+        } catch {}
       } catch {
-        // silencieux: l’UI SSE init fera le reste si dispo
+        // si ça échoue, SSE init pourra remplir l'UI
       }
     })();
 
-    // 2) SSE setup
-    const cleanupES = () => {
-      try {
-        if (esRef.current) esRef.current.close();
-      } catch {}
-      esRef.current = null;
-
-      if (sseMonitorTimerRef.current) {
-        clearInterval(sseMonitorTimerRef.current);
-        sseMonitorTimerRef.current = null;
-      }
-
-      if (sseFlushTimerRef.current) {
-        clearTimeout(sseFlushTimerRef.current);
-        sseFlushTimerRef.current = null;
-      }
+    return () => {
+      cancelled = true;
     };
+  }, [id, API_BASE]);
 
-    const setupES = () => {
+  /* --------------------------
+     SSE live (primary)
+  --------------------------- */
+  useEffect(() => {
+    let cancelled = false;
+
+    const setupSSE = () => {
       if (cancelled) return;
 
-      cleanupES();
+      cleanupSSE();
+      setSseStatus((s) => (s === 'live' ? 'reconnecting' : 'connecting'));
 
       const params = `minutes=1440`;
       const url = `${String(SSE_BASE).replace(/\/+$/, '')}/events/${id}/stream?${params}`;
 
-      esRef.current = new EventSource(url);
-      lastMsgTsRef.current = Date.now();
+      // IMPORTANT: withCredentials = cookies cross-origin si serveur l'autorise
+      try {
+        esRef.current = new EventSource(url, { withCredentials: true });
+      } catch {
+        // si le navigateur refuse EventSource init dict, fallback sans options
+        esRef.current = new EventSource(url);
+      }
 
-      // Monitor: si on ne reçoit rien, on reconnecte
-      sseMonitorTimerRef.current = setInterval(() => {
-        const pollSec = pollIntervalSecRef.current || 60;
-        const thresholdMs = Math.max(20000, pollSec * 2000);
-        if (Date.now() - lastMsgTsRef.current > thresholdMs) {
-          setupES();
-        }
-      }, 5000);
+      lastMsgTsRef.current = Date.now();
 
       esRef.current.onopen = () => {
         lastMsgTsRef.current = Date.now();
+        setSseStatus('live');
       };
 
       esRef.current.onerror = () => {
-        // Reconnexion simple (EventSource réessaie déjà, mais on force un reset propre)
-        // pour éviter les états "bloqués" selon proxy/infra.
+        if (cancelled) return;
+
+        setSseStatus('reconnecting');
+
         try {
           if (esRef.current) esRef.current.close();
         } catch {}
         esRef.current = null;
 
-        // petit backoff
-        setTimeout(() => {
-          if (!cancelled && !document.hidden) setupES();
-        }, 1000);
+        // backoff
+        sseReconnectTimerRef.current = setTimeout(() => {
+          if (!cancelled && !document.hidden) setupSSE();
+        }, 900);
       };
 
       esRef.current.onmessage = (ev) => {
@@ -502,187 +656,127 @@ export default function Dashboard() {
         lastMsgTsRef.current = Date.now();
 
         if (msg.type === 'init') {
-          // état initial + history
           const st = msg?.data?.state || null;
           const hist = Array.isArray(msg?.data?.history) ? msg.data.history : [];
 
-          sseBufferRef.current.lastState = st;
+          // event state
+          if (st) {
+            setEvent((prev) => (prev ? { ...prev, state: st } : prev));
+            const initTotal = safeNum(st?.total, 0);
 
-          setEvent((prev) => (prev ? { ...prev, state: st } : prev));
-          setHistory(hist);
-
-          // total initial
-          const initTotal =
-            typeof st?.total === 'number' ? st.total : Number(st?.total) || 0;
-
-          setPreviousTotal(initTotal);
-          setTotalViewers(initTotal);
-          lastTotalRef.current = initTotal;
-
-          // poll interval dynamique si backend le fournit
-          if (msg?.data?.pollIntervalSec) {
-            const p = Number(msg.data.pollIntervalSec);
-            if (Number.isFinite(p) && p > 0) pollIntervalSecRef.current = p;
+            setPreviousTotal(initTotal);
+            setTotalViewers(initTotal);
+            lastTotalRef.current = initTotal;
           }
+
+          // total history
+          if (hist.length) setHistory(hist);
+
+          // poll interval backend (si fourni)
+          const p = safeNum(msg?.data?.pollIntervalSec, 0);
+          if (p > 0) pollIntervalSecRef.current = Math.max(1, Math.floor(p));
         }
 
         if (msg.type === 'tick') {
-          const ts = msg.data.ts;
-          const total = msg.data.total;
-          const streamsArr = Array.isArray(msg.data.streams) ? msg.data.streams : [];
+          const ts = msg?.data?.ts || new Date().toISOString();
+          const total = safeNum(msg?.data?.total, 0);
+          const streamsArr = Array.isArray(msg?.data?.streams) ? msg.data.streams : [];
 
-          // buffer state
-          sseBufferRef.current.lastState = {
-            total,
-            streams: Object.fromEntries(streamsArr.map((s) => [s.id, s])),
-          };
-
-          sseBufferRef.current.totals.push({ ts, total });
-
-          for (const s of streamsArr) {
-            const list = sseBufferRef.current.streams.get(s.id) || [];
-            list.push({ ts, current: s.current });
-            sseBufferRef.current.streams.set(s.id, list);
-          }
-
-          const scheduleFlush = () => {
-            if (sseFlushTimerRef.current) return;
-
-            sseFlushTimerRef.current = setTimeout(() => {
-              sseFlushTimerRef.current = null;
-
-              const buf = sseBufferRef.current;
-
-              // 1) état courant
-              if (buf.lastState) {
-                setEvent((prev) => (prev ? { ...prev, state: buf.lastState } : prev));
-
-                const sum = Object.values(buf.lastState.streams || {}).reduce(
-                  (acc, s) => acc + (typeof s.current === 'number' ? s.current : Number(s.current) || 0),
-                  0
-                );
-
-                // delta display fiable
-                setPreviousTotal(lastTotalRef.current);
-                setTotalViewers(sum);
-                lastTotalRef.current = sum;
-              }
-
-              // cutoff (éviter d’afficher avant created_at)
-              const cutoff =
-                createdAtRef.current ? new Date(createdAtRef.current).getTime() : 0;
-
-              // 2) historique total
-              if (buf.totals.length) {
-                setHistory((h) => {
-                  const next = h.concat(buf.totals);
-                  buf.totals = [];
-                  return cutoff ? next.filter((row) => new Date(row.ts).getTime() >= cutoff) : next;
-                });
-              }
-
-              // 3) historique par stream
-              if (buf.streams.size) {
-                setStreamsHistory((prev) => {
-                  const next = { ...prev };
-                  for (const [sid, arrNew] of buf.streams.entries()) {
-                    const arr = next[sid] || [];
-                    const merged = arr.concat(arrNew);
-                    next[sid] = cutoff
-                      ? merged.filter((row) => new Date(row.ts).getTime() >= cutoff)
-                      : merged;
-                  }
-                  buf.streams.clear();
-                  return next;
-                });
-              }
-
-              // 4) redraw chart pour être sûr (certaines configs chartjs/react-chartjs-2 le nécessitent)
-              try {
-                const chart = getChartInstance(totalChartRef);
-                if (chart && typeof chart.update === 'function') chart.update('none');
-              } catch {}
-            }, SSE_THROTTLE_MS);
-          };
-
-          scheduleFlush();
+          pushTick({ ts, total, streamsArr });
         }
       };
     };
 
-    setupES();
+    setupSSE();
 
-    const handleVisibility = () => {
-      if (document.hidden) {
-        cleanupES();
-      } else {
-        setupES();
+    // watchdog: si pas de msg depuis X sec => reconnect + polling fallback
+    const watchdog = setInterval(() => {
+      const since = Date.now() - lastMsgTsRef.current;
+      if (since > 8000) {
+        // SSE pas vraiment “live”
+        setSseStatus((s) => (s === 'live' ? 'reconnecting' : s));
+        setupSSE();
       }
+    }, 2500);
+
+    const vis = () => {
+      if (document.hidden) cleanupSSE();
+      else setupSSE();
     };
 
-    document.addEventListener('visibilitychange', handleVisibility);
+    document.addEventListener('visibilitychange', vis);
 
     return () => {
       cancelled = true;
-      document.removeEventListener('visibilitychange', handleVisibility);
-      cleanupES();
+      clearInterval(watchdog);
+      document.removeEventListener('visibilitychange', vis);
+      cleanupSSE();
     };
   }, [id, SSE_BASE]);
 
   /* --------------------------
-     Load initial JSON history (fallback/complément)
+     Polling live (fallback) - zero refresh
+     Si SSE down, on poll /events/:id (ou /history court) pour garder le direct.
   --------------------------- */
   useEffect(() => {
-    let aborted = false;
+    let cancelled = false;
 
-    (async () => {
+    cleanupPoll();
+
+    pollTimerRef.current = setInterval(async () => {
+      if (cancelled) return;
+      if (document.hidden) return;
+
+      // si SSE est live, pas besoin de poll
+      if (sseStatus === 'live') return;
+
       try {
-        const url = `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/history?minutes=1440&streams=1&limit=5000`;
-        let res = await fetch(url);
-
+        // endpoint le plus stable: /events/:id (contient state)
+        const url = `${String(API_BASE).replace(/\/+$/, '')}/events/${id}`;
+        const res = await fetch(url, { credentials: 'include' });
         if (!res.ok) return;
 
-        const ct = res.headers.get('content-type') || '';
-        if (!ct.includes('application/json')) {
-          // fallback direct :4000
-          const direct = `${proto}//${host}:4000`;
-          res = await fetch(
-            `${direct.replace(/\/+$/, '')}/events/${id}/history?minutes=1440&streams=1&limit=5000`
-          );
-          if (!res.ok) return;
-        }
+        const ev = await res.json();
+        if (cancelled) return;
 
-        const data = await res.json();
-        if (aborted) return;
+        // mettre à jour event (streams + state)
+        setEvent((prev) => {
+          if (!prev) return ev;
+          return {
+            ...prev,
+            ...ev,
+            streams: ev?.streams || prev.streams || [],
+            state: ev?.state || prev.state || null,
+          };
+        });
 
-        if (Array.isArray(data.history)) setHistory(data.history);
+        // pousser un tick local pour graphe
+        const st = ev?.state || {};
+        const total = safeNum(st.total, 0);
 
-        if (Array.isArray(data.streams)) {
-          const grouped = {};
-          for (const row of data.streams) {
-            const sid = row.stream_id;
-            const arr = grouped[sid] || [];
-            arr.push({ ts: row.ts, current: row.concurrent_viewers });
-            grouped[sid] = arr;
-          }
-          setStreamsHistory(grouped);
-        }
+        const streamsArr = Object.entries(st.streams || {}).map(([sid, s]) => ({
+          id: sid,
+          current: safeNum(s?.current, 0),
+          online: !!s?.online,
+        }));
+
+        pushTick({ ts: new Date().toISOString(), total, streamsArr });
       } catch {
-        // silencieux
+        // ignore
       }
-    })();
+    }, Math.max(1000, pollIntervalSecRef.current * 1000));
 
     return () => {
-      aborted = true;
+      cancelled = true;
+      cleanupPoll();
     };
-  }, [id, API_BASE, host, proto]);
+  }, [id, API_BASE, sseStatus]);
 
   /* --------------------------
-     Chart models (memo)
+     Derived data for charts
   --------------------------- */
   const streamList = event?.streams || [];
 
-  // bornes X basées sur history/streamsHistory
   const xBounds = useMemo(() => {
     const now = new Date();
 
@@ -691,7 +785,7 @@ export default function Dashboard() {
     if (Array.isArray(history) && history.length) {
       for (const row of history) {
         const ts = new Date(row.ts).getTime();
-        if (ts < t) t = ts;
+        if (Number.isFinite(ts) && ts < t) t = ts;
       }
     }
 
@@ -700,7 +794,7 @@ export default function Dashboard() {
       if (Array.isArray(arr)) {
         for (const row of arr) {
           const ts = new Date(row.ts).getTime();
-          if (ts < t) t = ts;
+          if (Number.isFinite(ts) && ts < t) t = ts;
         }
       }
     }
@@ -721,16 +815,16 @@ export default function Dashboard() {
     return totalMinutes >= 1440 ? 'day' : totalMinutes >= 360 ? 'hour' : 'minute';
   }, [xBounds]);
 
-  // total series points (downsample + keep last)
   const totalVisiblePoints = useMemo(() => {
-    const series = reduceSeries(history);
-    const points = series.map((p) => ({
-      x: new Date(p.ts),
-      y: typeof p.total === 'number' ? p.total : Number(p.total) || 0,
-    }));
-    return points.filter((p) => p.x >= xBounds.xMin && p.x <= xBounds.xMax);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, xBounds.xMin, xBounds.xMax]);
+    const series = reduceSeries(history, 3500);
+    return series
+      .map((p) => ({
+        x: new Date(p.ts),
+        y: safeNum(p.total, 0),
+      }))
+      .filter((p) => Number.isFinite(p.x.valueOf()) && Number.isFinite(p.y))
+      .filter((p) => p.x >= xBounds.xMin && p.x <= xBounds.xMax);
+  }, [history, xBounds]);
 
   const totalData = useMemo(() => {
     return {
@@ -740,10 +834,10 @@ export default function Dashboard() {
           label: 'Spectateurs',
           data: totalVisiblePoints,
           borderColor: '#0c2164ff',
-          backgroundColor: 'rgba(139, 92, 246, 0.1)',
+          backgroundColor: 'rgba(139, 92, 246, 0.12)',
           borderWidth: 3,
           fill: true,
-          tension: 0.4,
+          tension: 0.35,
           pointRadius: 0,
           pointHoverRadius: 0,
         },
@@ -752,7 +846,7 @@ export default function Dashboard() {
   }, [totalVisiblePoints]);
 
   const totalOptions = useMemo(() => {
-    const ys = totalVisiblePoints.map((p) => (typeof p.y === 'number' ? p.y : Number(p.y) || 0));
+    const ys = totalVisiblePoints.map((p) => safeNum(p.y, 0));
     const maxY = ys.length ? Math.max(10, ...ys) : 10;
     const minY = ys.length ? Math.min(...ys) : 0;
 
@@ -770,11 +864,9 @@ export default function Dashboard() {
           borderColor: '#0c2164ff',
           borderWidth: 1,
         },
-        decimation: {
-          enabled: true,
-          algorithm: 'lttb',
-          threshold: 500,
-        },
+        // IMPORTANT: on désactive la décimation pour éviter l'effet "ça bouge pas"
+        // (tu as déjà reduceSeries + cap, c'est suffisant)
+        decimation: { enabled: false },
       },
       scales: {
         x: {
@@ -794,13 +886,12 @@ export default function Dashboard() {
         },
       },
       animation: false,
-      elements: { point: { radius: 0 } },
       interaction: { intersect: false, mode: 'index' },
       spanGaps: true,
+      elements: { point: { radius: 0 } },
     };
   }, [timeUnit, xBounds, totalVisiblePoints]);
 
-  // Hook sûr: redraw chart quand les points changent (PLACÉ AVANT tout return conditionnel)
   useEffect(() => {
     try {
       const chart = getChartInstance(totalChartRef);
@@ -828,7 +919,7 @@ export default function Dashboard() {
         minute: '2-digit',
         second: '2-digit',
       });
-      const total = typeof r.total === 'number' ? r.total : Number(r.total) || 0;
+      const total = safeNum(r.total, 0);
       return `${heure},${total}`;
     });
 
@@ -947,7 +1038,7 @@ export default function Dashboard() {
 
           <h1
             style={{
-              margin: '0 0 1rem 0',
+              margin: '0 0 0.6rem 0',
               fontSize: '2.5rem',
               fontWeight: '700',
               background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
@@ -959,6 +1050,17 @@ export default function Dashboard() {
             📊 Dashboard Live
           </h1>
 
+          {/* SSE status */}
+          <div style={{ opacity: 0.85, fontWeight: 600, marginBottom: '1rem' }}>
+            {sseStatus === 'live' && <span style={{ color: '#10b981' }}>LIVE</span>}
+            {sseStatus === 'connecting' && <span style={{ color: '#f59e0b' }}>Connexion…</span>}
+            {sseStatus === 'reconnecting' && <span style={{ color: '#f59e0b' }}>Reconnexion…</span>}
+            {sseStatus === 'down' && <span style={{ color: '#ef4444' }}>Hors ligne</span>}
+            <span style={{ color: 'rgba(255,255,255,0.65)', marginLeft: 10 }}>
+              (sans refresh, mise à jour auto)
+            </span>
+          </div>
+
           <div
             style={{
               background:
@@ -967,7 +1069,7 @@ export default function Dashboard() {
               border: '1px solid rgba(255,255,255,0.3)',
               borderRadius: '20px',
               padding: '2rem',
-              maxWidth: '400px',
+              maxWidth: '420px',
               margin: '0 auto',
               boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
             }}
@@ -995,7 +1097,7 @@ export default function Dashboard() {
                 lineHeight: '1',
               }}
             >
-              {totalViewers?.toLocaleString() || 0}
+              {safeNum(totalViewers, 0).toLocaleString()}
             </div>
 
             {totalViewers > previousTotal && (
@@ -1030,8 +1132,8 @@ export default function Dashboard() {
                 <DynamicStreamCard
                   key={s.id}
                   label={s.label}
-                  current={st?.current ?? 0}
-                  online={st?.online ?? false}
+                  current={safeNum(st?.current, 0)}
+                  online={!!st?.online}
                 />
               );
             })}
@@ -1063,7 +1165,7 @@ export default function Dashboard() {
               📈 Évolution Temps Réel
             </h3>
 
-            <div style={{ height: '300px', position: 'relative' }}>
+            <div style={{ height: '320px', position: 'relative' }}>
               <Line
                 ref={totalChartRef}
                 data={totalData}
@@ -1141,11 +1243,15 @@ export default function Dashboard() {
                       ? { type: 'total', from: createdAtRef.current, to: new Date().toISOString() }
                       : { type: 'total', minutes: 180 };
 
-                    const res = await fetch(`${String(API_BASE).replace(/\/+$/, '')}/events/${id}/export`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify(payload),
-                    });
+                    const res = await fetch(
+                      `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/export`,
+                      {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                        credentials: 'include',
+                      }
+                    );
 
                     const data = await res.json();
                     if (!data.jobId) throw new Error('jobId manquant');
@@ -1154,7 +1260,8 @@ export default function Dashboard() {
 
                     const poll = async () => {
                       const sres = await fetch(
-                        `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/status`
+                        `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/status`,
+                        { credentials: 'include' }
                       );
                       const sdata = await sres.json();
 
@@ -1255,13 +1362,16 @@ export default function Dashboard() {
                 }}
               >
                 {streamList.map((stream) => {
-                  const rows = reduceSeries(streamsHistory[stream.id] || []);
-                  const points = rows.map((r) => ({
-                    x: new Date(r.ts),
-                    y: typeof r.current === 'number' ? r.current : Number(r.current) || 0,
-                  }));
+                  const rows = reduceSeries(streamsHistory[stream.id] || [], 2500);
+                  const points = rows
+                    .map((r) => ({
+                      x: new Date(r.ts),
+                      y: safeNum(r.current, 0),
+                    }))
+                    .filter((p) => Number.isFinite(p.x.valueOf()) && Number.isFinite(p.y));
 
                   const st = event.state?.streams?.[stream.id];
+
                   const sd = {
                     datasets: [
                       {
@@ -1269,17 +1379,21 @@ export default function Dashboard() {
                         label: stream.label,
                         data: points,
                         borderColor: st?.online ? '#10b981' : '#ef4444',
-                        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                        backgroundColor: 'rgba(139, 92, 246, 0.10)',
                         borderWidth: 2,
                         tension: 0.3,
                         pointRadius: 0,
+                        fill: true,
                       },
                     ],
                   };
 
-                  // options stream: on garde le même X live, mais on laisse Y auto
                   const so = {
                     ...totalOptions,
+                    plugins: {
+                      ...totalOptions.plugins,
+                      legend: { display: false },
+                    },
                     scales: {
                       ...totalOptions.scales,
                       y: {
@@ -1384,6 +1498,7 @@ export default function Dashboard() {
                                   method: 'POST',
                                   headers: { 'Content-Type': 'application/json' },
                                   body: JSON.stringify(payload),
+                                  credentials: 'include',
                                 }
                               );
 
@@ -1392,7 +1507,8 @@ export default function Dashboard() {
 
                               const poll = async () => {
                                 const sres = await fetch(
-                                  `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/status`
+                                  `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/status`,
+                                  { credentials: 'include' }
                                 );
                                 const sdata = await sres.json();
 
@@ -1437,7 +1553,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* CSS anims */}
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }

@@ -345,7 +345,9 @@ export default function ClientDashboard() {
         {
           id: 'total',
           label: 'Total viewers',
-          data: reducedHistory.map((p) => ({ x: p.ts, y: p.total })),
+          data: reducedHistory
+            .map((p) => ({ x: p.ts, y: p.total }))
+            .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
           borderColor: '#3b82f6',
           backgroundColor: 'rgba(59,130,246,0.2)',
           fill: true,
@@ -366,7 +368,7 @@ export default function ClientDashboard() {
         legend: { display: false },
         tooltip: { mode: 'nearest', intersect: false },
         decimation: {
-          enabled: true,
+          enabled: false,
           algorithm: 'lttb',
           threshold: 500,
         },

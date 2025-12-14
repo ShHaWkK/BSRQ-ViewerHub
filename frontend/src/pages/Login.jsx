@@ -32,20 +32,12 @@ export default function Login({ forceAud, forceRedirect }) {
     if (token) {
       setLoading(true);
       const url = `/api/auth/magic?token=${encodeURIComponent(token)}&redirect=${encodeURIComponent(redirectParam)}`;
-      fetch(url, { credentials: 'same-origin' })
-        .then(res => {
-          if (res.redirected) {
-            navigate(redirectParam, { replace: true });
-            return;
-          }
-          if (res.ok) {
-            navigate(redirectParam, { replace: true });
-          } else {
-            setError('Lien invalide ou expiré');
-          }
-        })
-        .catch(() => setError('Erreur réseau'))
-        .finally(() => setLoading(false));
+      try {
+        window.location.replace(url);
+      } catch (e) {
+        setError('Erreur réseau');
+        setLoading(false);
+      }
     }
   }, [params, navigate, redirectParam]);
 
@@ -63,19 +55,36 @@ export default function Login({ forceAud, forceRedirect }) {
       if (!res.ok) {
         setError('Mot de passe invalide');
       } else {
-        // le backend renvoie { ok: true, aud }
         let target = defaultRedirect;
+        let wantedAud = audParam === 'client' ? 'client' : 'admin';
         try {
           const data = await res.json();
-          if (data?.aud === 'client') target = forceRedirect || params.get('redirect') || '/events';
+          wantedAud = (data?.aud === 'client') ? 'client' : 'admin';
+          if (wantedAud === 'client') target = forceRedirect || params.get('redirect') || '/events';
           else target = forceRedirect || params.get('redirect') || '/admin';
         } catch {
           target = redirectParam;
         }
-        // Navigation SPA: le cookie HttpOnly est déjà posé, ProtectedRoute validera
-        // Petite attente pour s'assurer que le navigateur a bien persisté le cookie
-        await new Promise(r => setTimeout(r, 100));
-        navigate(target, { replace: true });
+
+        const check = async () => {
+          try {
+            const chk = await fetch(`/api/auth/check?aud=${encodeURIComponent(wantedAud)}`, {
+              credentials: 'same-origin',
+              cache: 'no-store',
+            });
+            return !!chk.ok;
+          } catch {
+            return false;
+          }
+        };
+
+        const delays = [0, 250, 750, 1500];
+        for (let i = 0; i < delays.length; i++) {
+          if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
+          const ok = await check();
+          if (ok) { navigate(target, { replace: true }); return; }
+        }
+        try { window.location.assign(target); } catch { navigate(target, { replace: true }); }
       }
     } catch {
       setError('Erreur réseau');
