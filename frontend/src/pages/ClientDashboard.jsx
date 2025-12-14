@@ -13,6 +13,7 @@ import {
   Decimation,
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
+
 import { getEvent } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
@@ -27,43 +28,80 @@ ChartJS.register(
   Decimation
 );
 
-// compat react-chartjs-2 ref: parfois c’est { chart }, parfois directement le chart
+// compat react-chartjs-2 ref: parfois { chart }, parfois directement le chart
 const getChartInstance = (refObj) => {
   const r = refObj?.current;
   if (!r) return null;
   return r.chart || r;
 };
 
+const safeNum = (v, d = 0) => {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : d;
+};
+
+// Append 1 point (no duplicate ts), keep last MAX points
+const appendPoint = (arr, p, MAX = 5000) => {
+  const out = Array.isArray(arr) ? arr.slice() : [];
+  if (!p || !p.ts) return out;
+
+  const tsIso = new Date(p.ts).toISOString();
+  const last = out[out.length - 1];
+
+  if (last && new Date(last.ts).toISOString() === tsIso) {
+    out[out.length - 1] = { ...last, ...p, ts: tsIso };
+  } else {
+    out.push({ ...p, ts: tsIso });
+  }
+
+  if (out.length > MAX) out.splice(0, out.length - MAX);
+  return out;
+};
+
+// downsample: garde le dernier point sinon impression de “freeze”
+const reduceSeriesKeepLast = (rows, MAX_POINTS = 3000) => {
+  if (!Array.isArray(rows)) return [];
+  if (rows.length <= MAX_POINTS) return rows;
+
+  const stride = Math.ceil(rows.length / MAX_POINTS);
+  const out = [];
+  for (let i = 0; i < rows.length; i += stride) out.push(rows[i]);
+
+  const last = rows[rows.length - 1];
+  if (out[out.length - 1] !== last) out.push(last);
+  return out;
+};
+
 export default function ClientDashboard() {
   const { id } = useParams();
 
   const [event, setEvent] = useState(null);
+
+  // total + delta
   const [totalViewers, setTotalViewers] = useState(0);
   const [previousTotal, setPreviousTotal] = useState(0);
 
-  // history: on stocke { ts: number(ms), total: number }
+  // history total: [{ts: string ISO, total:number}]
   const [history, setHistory] = useState([]);
+
+  // status
+  const [sseStatus, setSseStatus] = useState('connecting'); // connecting | live | reconnecting
+  const lastMsgTsRef = useRef(Date.now());
 
   // refs infra
   const esRef = useRef(null);
-  const sseReconnectAttemptRef = useRef(0);
-  const sseReconnectTimerRef = useRef(null);
-  const pollTimerRef = useRef(null);
-  const watchdogRef = useRef(null);
-  const lastUpdateRef = useRef(0);
-
-  // buffer SSE pour éviter trop de re-render
+  const reconnectTimerRef = useRef(null);
   const flushTimerRef = useRef(null);
-  const bufferRef = useRef({ points: [] });
+  const pollTimerRef = useRef(null);
 
-  // chart ref
   const chartRef = useRef(null);
 
-  // config env
+  // env base
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
   let API_BASE = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
 
+  // dev proxy fallback: si API_BASE est relative, basculer vers :4000 sur ports dev
   if (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined') {
     const port = window.location.port;
     const devPorts = new Set(['3000', '3001', '3019']);
@@ -75,36 +113,51 @@ export default function ClientDashboard() {
       ? `${proto}//${host}:4000`
       : API_BASE;
 
-  // downsample: garde le dernier point sinon “ça s’arrête”
-  const MAX_POINTS = 3000;
-  const reduceSeriesKeepLast = (rows) => {
-    if (!Array.isArray(rows)) return [];
-    if (rows.length <= MAX_POINTS) return rows;
+  // buffer SSE pour éviter trop de re-render
+  const bufferRef = useRef({
+    lastTotal: null,
+    points: [], // [{ts,total}]
+  });
 
-    const stride = Math.ceil(rows.length / MAX_POINTS);
-    const out = [];
-    for (let i = 0; i < rows.length; i += stride) out.push(rows[i]);
+  const cleanupSSE = () => {
+    try {
+      if (esRef.current) esRef.current.close();
+    } catch {}
+    esRef.current = null;
 
-    const last = rows[rows.length - 1];
-    if (out[out.length - 1] !== last) out.push(last);
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
 
-    return out;
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
   };
 
-  // --------- Load event initial (pour total + label etc.)
+  const cleanupPoll = () => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  // ---------- Load event initial (state + total initial)
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         const ev = await getEvent(id);
         if (!mounted) return;
+
         setEvent(ev);
 
-        const tot = Number(ev?.state?.total || 0);
+        const tot = safeNum(ev?.state?.total, 0);
         setPreviousTotal(tot);
         setTotalViewers(tot);
       } catch {
-        // silencieux
+        // silencieux: SSE/poll prendront le relai
       }
     })();
 
@@ -113,83 +166,88 @@ export default function ClientDashboard() {
     };
   }, [id]);
 
-  // --------- Poll fallback
-  function startPolling(intervalMs = 10000) {
-    if (pollTimerRef.current) {
-      clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-
+  // ---------- Poll fallback live (si SSE down) : pas d'export côté client
+  const startPolling = (intervalMs = 2500) => {
+    cleanupPoll();
     pollTimerRef.current = setInterval(async () => {
+      if (document.hidden) return;
+
+      // si SSE est live, ne poll pas
+      if (sseStatus === 'live') return;
+
       try {
         const ev = await getEvent(id);
-        const ts = Date.now();
-        const tot = Number(ev?.state?.total || 0);
 
-        setTotalViewers((t) => {
-          setPreviousTotal(t);
+        // update event minimal
+        setEvent((prev) => {
+          if (!prev) return ev;
+          return {
+            ...prev,
+            ...ev,
+            streams: ev?.streams || prev.streams,
+            state: ev?.state || prev.state,
+          };
+        });
+
+        const tot = safeNum(ev?.state?.total, 0);
+        const ts = new Date().toISOString();
+
+        // total live + delta
+        setPreviousTotal((prevTot) => {
+          // prevTot ici = ancienne valeur affichée
+          return prevTot;
+        });
+        setTotalViewers((cur) => {
+          setPreviousTotal(cur);
           return tot;
         });
 
+        // point graphe
         setHistory((h) => {
-          const next = h.concat({ ts, total: tot });
+          const next = appendPoint(h, { ts, total: tot }, 5000);
+          // garde 24h
           const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-          return next.filter((p) => p.ts >= cutoff);
+          return next.filter((p) => new Date(p.ts).getTime() >= cutoff);
         });
 
-        lastUpdateRef.current = Date.now();
-
-        // redraw chart (important sur certains builds)
+        // redraw chart
         try {
           const chart = getChartInstance(chartRef);
           if (chart && typeof chart.update === 'function') chart.update('none');
         } catch {}
       } catch {
-        // silencieux
+        // ignore
       }
-    }, Math.max(3000, intervalMs));
-  }
+    }, Math.max(1000, intervalMs));
+  };
 
-  // --------- SSE setup + buffering
-  useEffect(() => {
-    let cancelled = false;
-
-    const cleanupES = () => {
-      try {
-        if (esRef.current) esRef.current.close();
-      } catch {}
-      esRef.current = null;
-
-      if (sseReconnectTimerRef.current) {
-        clearTimeout(sseReconnectTimerRef.current);
-        sseReconnectTimerRef.current = null;
-      }
-
-      if (flushTimerRef.current) {
-        clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
-    };
-
-    const stopPolling = () => {
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-    };
-
-    const flush = () => {
+  // ---------- Flush buffered points (throttle)
+  const scheduleFlush = () => {
+    if (flushTimerRef.current) return;
+    flushTimerRef.current = setTimeout(() => {
       flushTimerRef.current = null;
 
-      const buf = bufferRef.current.points;
-      if (!buf.length) return;
+      const buf = bufferRef.current;
+      if (!buf.points.length) return;
 
-      // merge history (garde les 24h)
+      // Apply total last
+      if (buf.lastTotal !== null) {
+        const tot = buf.lastTotal;
+        setTotalViewers((cur) => {
+          setPreviousTotal(cur);
+          return tot;
+        });
+        buf.lastTotal = null;
+      }
+
+      // merge points (keep 24h + cap)
       setHistory((h) => {
-        const merged = h.concat(buf);
-        bufferRef.current.points = [];
+        let next = Array.isArray(h) ? h : [];
+        for (const p of buf.points) next = appendPoint(next, p, 5000);
+        buf.points = [];
+
         const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-        return merged.filter((p) => p.ts >= cutoff);
+        return next.filter((p) => new Date(p.ts).getTime() >= cutoff);
       });
 
       // redraw chart
@@ -197,50 +255,54 @@ export default function ClientDashboard() {
         const chart = getChartInstance(chartRef);
         if (chart && typeof chart.update === 'function') chart.update('none');
       } catch {}
-    };
+    }, 120);
+  };
 
-    const scheduleFlush = () => {
-      if (flushTimerRef.current) return;
-      flushTimerRef.current = setTimeout(flush, 250);
-    };
+  // ---------- SSE setup (primary) + reconnexion + watchdog
+  useEffect(() => {
+    let cancelled = false;
 
-    const setupES = () => {
+    const setupSSE = () => {
       if (cancelled) return;
 
-      cleanupES();
+      cleanupSSE();
+      setSseStatus((s) => (s === 'live' ? 'reconnecting' : 'connecting'));
 
       const params = `minutes=1440`;
       const url = `${String(SSE_BASE).replace(/\/+$/, '')}/events/${id}/stream?${params}`;
 
-      esRef.current = new EventSource(url);
-      lastUpdateRef.current = Date.now();
+      // IMPORTANT: cookies cross-origin si backend le permet
+      try {
+        esRef.current = new EventSource(url, { withCredentials: true });
+      } catch {
+        esRef.current = new EventSource(url);
+      }
+
+      lastMsgTsRef.current = Date.now();
 
       esRef.current.onopen = () => {
-        sseReconnectAttemptRef.current = 0;
-        stopPolling(); // SSE OK => on coupe le polling
+        lastMsgTsRef.current = Date.now();
+        setSseStatus('live');
+        cleanupPoll(); // SSE ok => stop poll
       };
 
       esRef.current.onerror = () => {
+        if (cancelled) return;
+
+        setSseStatus('reconnecting');
+
         try {
           if (esRef.current) esRef.current.close();
         } catch {}
         esRef.current = null;
 
-        const attempt = sseReconnectAttemptRef.current || 0;
-        const backoff = Math.min(30000, 1000 * Math.pow(2, attempt));
-        sseReconnectAttemptRef.current = attempt + 1;
+        // backoff léger
+        reconnectTimerRef.current = setTimeout(() => {
+          if (!cancelled && !document.hidden) setupSSE();
+        }, 900);
 
-        if (sseReconnectTimerRef.current) {
-          clearTimeout(sseReconnectTimerRef.current);
-          sseReconnectTimerRef.current = null;
-        }
-
-        sseReconnectTimerRef.current = setTimeout(() => {
-          if (!cancelled && !document.hidden) setupES();
-        }, backoff);
-
-        // fallback immédiat
-        if (!pollTimerRef.current) startPolling(10000);
+        // fallback polling immédiat
+        if (!pollTimerRef.current) startPolling(2500);
       };
 
       esRef.current.onmessage = (ev) => {
@@ -254,24 +316,28 @@ export default function ClientDashboard() {
           return;
         }
 
-        lastUpdateRef.current = Date.now();
+        lastMsgTsRef.current = Date.now();
 
         if (msg.type === 'init') {
+          // history initial (total)
           const rows = Array.isArray(msg.data?.history) ? msg.data.history : [];
           const mapped = rows.map((r) => ({
-            ts: new Date(r.ts).getTime(),
-            total: Number(r.total || 0),
+            ts: new Date(r.ts).toISOString(),
+            total: safeNum(r.total, 0),
           }));
 
           setHistory(mapped);
 
-          setEvent((e) => ({ ...(e || {}), state: msg.data?.state }));
-
-          const tot = Number(msg.data?.state?.total || 0);
-          setTotalViewers((t) => {
-            setPreviousTotal(t);
-            return tot;
+          // event state minimal
+          setEvent((prev) => {
+            const st = msg.data?.state || null;
+            if (!prev) return st ? { state: st, streams: [] } : prev;
+            return { ...prev, state: st || prev.state };
           });
+
+          const tot = safeNum(msg.data?.state?.total, 0);
+          setPreviousTotal(tot);
+          setTotalViewers(tot);
 
           // redraw
           try {
@@ -281,75 +347,63 @@ export default function ClientDashboard() {
         }
 
         if (msg.type === 'tick') {
-          const ts = new Date(msg.data?.ts).getTime();
-          const tot = Number(msg.data?.total || 0);
+          const ts = msg?.data?.ts ? new Date(msg.data.ts).toISOString() : new Date().toISOString();
+          const tot = safeNum(msg?.data?.total, 0);
 
-          // total live
-          setTotalViewers((t) => {
-            setPreviousTotal(t);
-            return tot;
-          });
-
-          // buffer points, flush throttled
+          // buffer total + point
+          bufferRef.current.lastTotal = tot;
           bufferRef.current.points.push({ ts, total: tot });
           scheduleFlush();
         }
       };
     };
 
-    setupES();
+    setupSSE();
+
+    const watchdog = setInterval(() => {
+      // si pas de message depuis 8s => polling + reset SSE
+      const since = Date.now() - lastMsgTsRef.current;
+      if (since > 8000) {
+        if (!pollTimerRef.current) startPolling(2500);
+        setSseStatus((s) => (s === 'live' ? 'reconnecting' : s));
+        setupSSE();
+      }
+    }, 2500);
 
     const handleVisibility = () => {
       if (document.hidden) {
-        cleanupES();
-        stopPolling(); // pas besoin de poller onglet caché
+        cleanupSSE();
+        cleanupPoll();
       } else {
-        setupES();
+        setupSSE();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // watchdog: si rien ne bouge, polling
-    watchdogRef.current = setInterval(() => {
-      const now = Date.now();
-      const STALE_MS = 20000;
-      if (lastUpdateRef.current && now - lastUpdateRef.current > STALE_MS) {
-        if (!pollTimerRef.current) startPolling(10000);
-      }
-    }, 5000);
-
     return () => {
       cancelled = true;
+      clearInterval(watchdog);
       document.removeEventListener('visibilitychange', handleVisibility);
-      cleanupES();
-
-      if (watchdogRef.current) {
-        clearInterval(watchdogRef.current);
-        watchdogRef.current = null;
-      }
-
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
+      cleanupSSE();
+      cleanupPoll();
     };
   }, [id, SSE_BASE]);
 
   // --------- chart models
-  const reducedHistory = useMemo(() => reduceSeriesKeepLast(history), [history]);
+  const reducedHistory = useMemo(() => reduceSeriesKeepLast(history, 3000), [history]);
 
   const chartData = useMemo(() => {
     return {
       datasets: [
         {
           id: 'total',
-          label: 'Total viewers',
+          label: 'Spectateurs',
           data: reducedHistory
-            .map((p) => ({ x: p.ts, y: p.total }))
-            .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
+            .map((p) => ({ x: new Date(p.ts), y: safeNum(p.total, 0) }))
+            .filter((p) => Number.isFinite(p.x.valueOf()) && Number.isFinite(p.y)),
           borderColor: '#3b82f6',
-          backgroundColor: 'rgba(59,130,246,0.2)',
+          backgroundColor: 'rgba(59,130,246,0.18)',
           fill: true,
           tension: 0.3,
           pointRadius: 0,
@@ -367,11 +421,8 @@ export default function ClientDashboard() {
       plugins: {
         legend: { display: false },
         tooltip: { mode: 'nearest', intersect: false },
-        decimation: {
-          enabled: false,
-          algorithm: 'lttb',
-          threshold: 500,
-        },
+        // IMPORTANT: pas de decimation ici (sinon impression freeze)
+        decimation: { enabled: false },
       },
       scales: {
         x: {
@@ -400,19 +451,39 @@ export default function ClientDashboard() {
   return (
     <div className="app-bg">
       <div className="container" style={{ paddingTop: '6vh' }}>
-        {/* En-tête brandée */}
-        <div className="hero" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {/* header */}
+        <div
+          className="hero"
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <img src={bsrqLogo} alt="BSRQ" style={{ height: '40px' }} />
-            <h1 className="gradient-text" style={{ margin: 0, fontSize: '2rem' }}>
-              Dashboard Live
-            </h1>
+            <div>
+              <h1 className="gradient-text" style={{ margin: 0, fontSize: '2rem' }}>
+                Dashboard Live
+              </h1>
+              <div style={{ opacity: 0.85, fontWeight: 600, marginTop: 6 }}>
+                {sseStatus === 'live' && <span style={{ color: '#10b981' }}>LIVE</span>}
+                {sseStatus === 'connecting' && <span style={{ color: '#f59e0b' }}>Connexion…</span>}
+                {sseStatus === 'reconnecting' && <span style={{ color: '#f59e0b' }}>Reconnexion…</span>}
+                <span style={{ color: 'rgba(255,255,255,0.65)', marginLeft: 10 }}>
+                  (mise à jour auto, aucun refresh)
+                </span>
+              </div>
+            </div>
           </div>
+
           <Link to="/events" className="btn btn--brand-gb">
             Retour
           </Link>
         </div>
 
+        {/* total card */}
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'stretch', marginTop: '1.5rem' }}>
           <div
             style={{
@@ -421,8 +492,8 @@ export default function ClientDashboard() {
               border: '1px solid rgba(255,255,255,0.2)',
               borderRadius: '20px',
               padding: '2rem',
-              maxWidth: '400px',
-              margin: '0 auto',
+              maxWidth: '420px',
+              width: '100%',
               boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
             }}
           >
@@ -449,7 +520,7 @@ export default function ClientDashboard() {
                 lineHeight: '1',
               }}
             >
-              {totalViewers?.toLocaleString() || 0}
+              {safeNum(totalViewers, 0).toLocaleString()}
             </div>
 
             {totalViewers > previousTotal && (
@@ -458,9 +529,34 @@ export default function ClientDashboard() {
               </div>
             )}
           </div>
+
+          {/* petite carte info event optionnelle */}
+          <div
+            style={{
+              flex: 1,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 20,
+              padding: '2rem',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              minHeight: 140,
+            }}
+          >
+            <div style={{ opacity: 0.9 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>
+                {event?.name || `Évènement ${id}`}
+              </div>
+              <div style={{ color: 'rgba(255,255,255,0.75)' }}>
+                Les chiffres se mettent à jour automatiquement en temps réel.
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div style={{ padding: '2rem 1rem' }}>
+        {/* chart */}
+        <div style={{ padding: '2rem 0 1rem' }}>
           <div
             style={{
               background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
@@ -485,8 +581,25 @@ export default function ClientDashboard() {
               📈 Évolution Temps Réel
             </h3>
 
-            <div style={{ height: '300px', position: 'relative' }}>
+            <div style={{ height: '320px', position: 'relative' }}>
               <Line ref={chartRef} data={chartData} options={chartOptions} datasetIdKey="id" />
+              {reducedHistory.length === 0 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'rgba(255,255,255,0.9)',
+                    fontWeight: 600,
+                    background: 'rgba(0,0,0,0.12)',
+                    borderRadius: 16,
+                  }}
+                >
+                  Aucune donnée disponible pour le moment.
+                </div>
+              )}
             </div>
           </div>
         </div>
