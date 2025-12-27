@@ -169,7 +169,6 @@ const DynamicStreamCard = ({ label, current, online }) => {
 
       animate();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current]);
 
   return (
@@ -379,6 +378,7 @@ export default function Dashboard() {
   const [jobExporting, setJobExporting] = useState(false);
   const [jobProgress, setJobProgress] = useState(0);
   const [jobId, setJobId] = useState(null);
+  const [canExport, setCanExport] = useState(false);
 
   const [sseStatus, setSseStatus] = useState('connecting'); // connecting | live | reconnecting | down
 
@@ -404,6 +404,22 @@ export default function Dashboard() {
     totalPoints: [],
     streamPoints: new Map(), // sid -> [{ts,current}]
   });
+
+  useEffect(() => {
+    let mounted = true;
+    fetch('/api/auth/check?aud=admin', { credentials: 'same-origin' })
+      .then((res) => {
+        if (!mounted) return;
+        setCanExport(!!res.ok);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setCanExport(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const reduceSeries = (rows, MAX = 3000) => {
     if (!Array.isArray(rows)) return [];
@@ -1218,92 +1234,96 @@ export default function Dashboard() {
                 Exporter PNG
               </button>
 
-              <button
-                onClick={() => exportTotalCsvLocal(`event_${id}_total_viewers.csv`)}
-                style={{
-                  background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
-                  color: 'white',
-                  border: 'none',
-                  padding: '0.5rem 1rem',
-                  borderRadius: '10px',
-                  cursor: 'pointer',
-                }}
-              >
-                Exporter CSV (Heure, Total)
-              </button>
+              {canExport && (
+                <button
+                  onClick={() => exportTotalCsvLocal(`event_${id}_total_viewers.csv`)}
+                  style={{
+                    background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
+                    color: 'white',
+                    border: 'none',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Exporter CSV (Heure, Total)
+                </button>
+              )}
 
-              <button
-                onClick={async () => {
-                  try {
-                    setJobExporting(true);
-                    setJobProgress(0);
-                    setJobId(null);
+              {canExport && (
+                <button
+                  onClick={async () => {
+                    try {
+                      setJobExporting(true);
+                      setJobProgress(0);
+                      setJobId(null);
 
-                    const payload = createdAtRef.current
-                      ? { type: 'total', from: createdAtRef.current, to: new Date().toISOString() }
-                      : { type: 'total', minutes: 180 };
+                      const payload = createdAtRef.current
+                        ? { type: 'total', from: createdAtRef.current, to: new Date().toISOString() }
+                        : { type: 'total', minutes: 180 };
 
-                    const res = await fetch(
-                      `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/export`,
-                      {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload),
-                        credentials: 'include',
-                      }
-                    );
-
-                    const data = await res.json();
-                    if (!data.jobId) throw new Error('jobId manquant');
-
-                    setJobId(data.jobId);
-
-                    const poll = async () => {
-                      const sres = await fetch(
-                        `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/status`,
-                        { credentials: 'include' }
+                      const res = await fetch(
+                        `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/export`,
+                        {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(payload),
+                          credentials: 'include',
+                        }
                       );
-                      const sdata = await sres.json();
 
-                      if (sdata.status === 'done') {
-                        setJobExporting(false);
-                        const url = `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/download`;
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = createdAtRef.current
-                          ? `event_${id}_history_all.csv`
-                          : `event_${id}_history_180m.csv`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        return;
-                      }
+                      const data = await res.json();
+                      if (!data.jobId) throw new Error('jobId manquant');
 
-                      if (sdata.status === 'error') {
-                        setJobExporting(false);
-                        return;
-                      }
+                      setJobId(data.jobId);
 
-                      setJobProgress(sdata.progress || 0);
-                      setTimeout(poll, 1000);
-                    };
+                      const poll = async () => {
+                        const sres = await fetch(
+                          `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/status`,
+                          { credentials: 'include' }
+                        );
+                        const sdata = await sres.json();
 
-                    poll();
-                  } catch {
-                    setJobExporting(false);
-                  }
-                }}
-                style={{
-                  background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
-                  color: 'white',
-                  border: 'none',
-                  padding: '0.5rem 1rem',
-                  borderRadius: '10px',
-                  cursor: 'pointer',
-                }}
-              >
-                {jobExporting ? `Job… ${jobProgress}` : 'Exporter CSV (async)'}
-              </button>
+                        if (sdata.status === 'done') {
+                          setJobExporting(false);
+                          const url = `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/download`;
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = createdAtRef.current
+                            ? `event_${id}_history_all.csv`
+                            : `event_${id}_history_180m.csv`;
+                          document.body.appendChild(a);
+                          a.click();
+                          document.body.removeChild(a);
+                          return;
+                        }
+
+                        if (sdata.status === 'error') {
+                          setJobExporting(false);
+                          return;
+                        }
+
+                        setJobProgress(sdata.progress || 0);
+                        setTimeout(poll, 1000);
+                      };
+
+                      poll();
+                    } catch {
+                      setJobExporting(false);
+                    }
+                  }}
+                  style={{
+                    background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
+                    color: 'white',
+                    border: 'none',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {jobExporting ? `Job… ${jobProgress}` : 'Exporter CSV (async)'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -1450,99 +1470,103 @@ export default function Dashboard() {
                           PNG
                         </button>
 
-                        <button
-                          onClick={() => {
-                            const nowIso = new Date().toISOString();
-                            const url = createdAtRef.current
-                              ? `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/streams/${stream.id}/history.csv?from=${encodeURIComponent(
-                                  createdAtRef.current
-                                )}&to=${encodeURIComponent(nowIso)}`
-                              : `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/streams/${stream.id}/history.csv?minutes=180`;
+                        {canExport && (
+                          <button
+                            onClick={() => {
+                              const nowIso = new Date().toISOString();
+                              const url = createdAtRef.current
+                                ? `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/streams/${stream.id}/history.csv?from=${encodeURIComponent(
+                                    createdAtRef.current
+                                  )}&to=${encodeURIComponent(nowIso)}`
+                                : `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/streams/${stream.id}/history.csv?minutes=180`;
 
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = createdAtRef.current
-                              ? `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_all.csv`
-                              : `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_180m.csv`;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                          }}
-                          style={{
-                            background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
-                            color: 'white',
-                            border: 'none',
-                            padding: '0.4rem 0.8rem',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          CSV
-                        </button>
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = createdAtRef.current
+                                ? `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_all.csv`
+                                : `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_180m.csv`;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                            }}
+                            style={{
+                              background: 'linear-gradient(45deg, #3b82f6, #0ea5e9)',
+                              color: 'white',
+                              border: 'none',
+                              padding: '0.4rem 0.8rem',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            CSV
+                          </button>
+                        )}
 
-                        <button
-                          onClick={async () => {
-                            try {
-                              const payload = createdAtRef.current
-                                ? {
-                                    type: 'stream',
-                                    sid: stream.id,
-                                    from: createdAtRef.current,
-                                    to: new Date().toISOString(),
+                        {canExport && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                const payload = createdAtRef.current
+                                  ? {
+                                      type: 'stream',
+                                      sid: stream.id,
+                                      from: createdAtRef.current,
+                                      to: new Date().toISOString(),
+                                    }
+                                  : { type: 'stream', sid: stream.id, minutes: 180 };
+
+                                const res = await fetch(
+                                  `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/export`,
+                                  {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(payload),
+                                    credentials: 'include',
                                   }
-                                : { type: 'stream', sid: stream.id, minutes: 180 };
-
-                              const res = await fetch(
-                                `${String(API_BASE).replace(/\/+$/, '')}/events/${id}/export`,
-                                {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify(payload),
-                                  credentials: 'include',
-                                }
-                              );
-
-                              const data = await res.json();
-                              if (!data.jobId) return;
-
-                              const poll = async () => {
-                                const sres = await fetch(
-                                  `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/status`,
-                                  { credentials: 'include' }
                                 );
-                                const sdata = await sres.json();
 
-                                if (sdata.status === 'done') {
-                                  const url = `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/download`;
-                                  const a = document.createElement('a');
-                                  a.href = url;
-                                  a.download = createdAtRef.current
-                                    ? `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_all.csv`
-                                    : `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_180m.csv`;
-                                  document.body.appendChild(a);
-                                  a.click();
-                                  document.body.removeChild(a);
-                                  return;
-                                }
+                                const data = await res.json();
+                                if (!data.jobId) return;
 
-                                if (sdata.status === 'error') return;
-                                setTimeout(poll, 1000);
-                              };
+                                const poll = async () => {
+                                  const sres = await fetch(
+                                    `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/status`,
+                                    { credentials: 'include' }
+                                  );
+                                  const sdata = await sres.json();
 
-                              poll();
-                            } catch {}
-                          }}
-                          style={{
-                            background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
-                            color: 'white',
-                            border: 'none',
-                            padding: '0.4rem 0.8rem',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Job
-                        </button>
+                                  if (sdata.status === 'done') {
+                                    const url = `${String(API_BASE).replace(/\/+$/, '')}/exports/${data.jobId}/download`;
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = createdAtRef.current
+                                      ? `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_all.csv`
+                                      : `${stream.label.replace(/\s+/g, '_')}_viewers_${id}_180m.csv`;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    document.body.removeChild(a);
+                                    return;
+                                  }
+
+                                  if (sdata.status === 'error') return;
+                                  setTimeout(poll, 1000);
+                                };
+
+                                poll();
+                              } catch {}
+                            }}
+                            style={{
+                              background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
+                              color: 'white',
+                              border: 'none',
+                              padding: '0.4rem 0.8rem',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Job
+                          </button>
+                        )}
                       </div>
                     </div>
                   );

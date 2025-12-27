@@ -16,9 +16,8 @@ app.use(cors({ origin: process.env.FRONTEND_ORIGIN }));
 // Faire confiance au proxy pour X-Forwarded-* (HTTPS derrière Nginx)
 app.set('trust proxy', 1);
 
-// Rate limit simple pour endpoints admin
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
-app.use('/events', limiter);
+const limiterWrites = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+const limiterLogin = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
 
 const events = new Map(); // état en mémoire
 const clients = new Map(); // SSE clients par évènement
@@ -107,7 +106,7 @@ app.get('/auth/check', (req, res) => {
   res.json({ ok: true, aud: payload.aud });
 });
 
-app.post('/auth/login', (req, res) => {
+app.post('/auth/login', limiterLogin, (req, res) => {
   const { password } = req.body || {};
   let aud;
   if (ADMIN_PASSWORD && password === ADMIN_PASSWORD) aud = 'admin';
@@ -306,7 +305,7 @@ async function seed() {
 // Routes API
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-app.post('/events', async (req, res) => {
+app.post('/events', limiterWrites, async (req, res) => {
   const { name, pollIntervalSec } = req.body;
   const poll = Math.max(2, parseInt(pollIntervalSec || process.env.POLL_INTERVAL_DEFAULT)) * 1000;
   const id = genId();
@@ -331,7 +330,7 @@ app.get('/events/:id', (req, res) => {
 });
 
 // Mettre à jour un événement (nom + intervalle de polling)
-app.put('/events/:id', async (req, res) => {
+app.put('/events/:id', limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { name, pollIntervalSec } = req.body || {};
@@ -350,7 +349,7 @@ app.put('/events/:id', async (req, res) => {
 });
 
 // Suppression (soft-delete) d'un évènement
-app.delete('/events/:id', async (req, res) => {
+app.delete('/events/:id', limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE events SET is_deleted=TRUE, deleted_at=NOW() WHERE id=$1', [ev.id]);
@@ -370,7 +369,7 @@ app.delete('/events/:id', async (req, res) => {
   }
 });
 
-app.post('/events/:id/streams', async (req, res) => {
+app.post('/events/:id/streams', limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { label, urlOrId, customTitle, customInterval } = req.body;
@@ -389,7 +388,7 @@ app.post('/events/:id/streams', async (req, res) => {
   }
 });
 
-app.delete('/events/:id/streams/:sid', async (req, res) => {
+app.delete('/events/:id/streams/:sid', limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('DELETE FROM streams WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);
@@ -427,10 +426,9 @@ async function handleYoutubeTitle(req, res) {
     }
     raw = String(raw || '').trim();
     const videoId = extractVideoId(raw);
-    if (!videoId) return res.status(400).json({ error: 'invalid_video_id' });
+    if (!videoId) return res.status(400).json({ error: 'invalid_video_id', message: 'ID vidéo invalide' });
     if (!process.env.YT_API_KEY) {
-      // Clé API manquante: signaler explicitement pour faciliter la config
-      return res.status(500).json({ error: 'api_key_missing' });
+      return res.status(500).json({ error: 'api_key_missing', message: 'Clé API manquante' });
     }
     const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${process.env.YT_API_KEY}`;
     let json;
@@ -438,13 +436,13 @@ async function handleYoutubeTitle(req, res) {
       const yt = await fetch(url, { timeout: 10000 });
       json = await yt.json();
     } catch (e) {
-      return res.status(502).json({ error: 'youtube_unreachable' });
+      return res.status(502).json({ error: 'youtube_unreachable', message: 'YouTube inaccessible' });
     }
     const title = (json.items && json.items[0] && json.items[0].snippet && json.items[0].snippet.title) || null;
-    if (!title) return res.status(404).json({ error: 'title_not_found' });
+    if (!title) return res.status(404).json({ error: 'title_not_found', message: 'Titre introuvable' });
     res.json({ title, videoId });
   } catch (e) {
-    res.status(500).json({ error: 'internal_error' });
+    res.status(500).json({ error: 'internal_error', message: 'Erreur interne' });
   }
 }
 
@@ -527,7 +525,7 @@ app.get('/events/:id/history', async (req, res) => {
 });
 
 // Routes pour contrôler la pause/start
-app.post('/events/:id/pause', async (req, res) => {
+app.post('/events/:id/pause', limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE events SET is_paused = TRUE WHERE id = $1', [ev.id]);
@@ -538,7 +536,7 @@ app.post('/events/:id/pause', async (req, res) => {
   }
 });
 
-app.post('/events/:id/start', async (req, res) => {
+app.post('/events/:id/start', limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE events SET is_paused = FALSE WHERE id = $1', [ev.id]);
@@ -550,7 +548,7 @@ app.post('/events/:id/start', async (req, res) => {
 });
 
 // Routes pour gérer les favoris
-app.post('/events/:id/streams/:sid/favorite', async (req, res) => {
+app.post('/events/:id/streams/:sid/favorite', limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { is_favorite } = req.body;
@@ -566,7 +564,7 @@ app.post('/events/:id/streams/:sid/favorite', async (req, res) => {
 });
 
 // Route pour réactiver un stream désactivé
-app.post('/events/:id/streams/:sid/reactivate', async (req, res) => {
+app.post('/events/:id/streams/:sid/reactivate', limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE streams SET is_disabled = FALSE, failure_count = 0, last_failure_at = NULL WHERE id = $1 AND event_id = $2', [req.params.sid, ev.id]);
@@ -583,7 +581,7 @@ app.post('/events/:id/streams/:sid/reactivate', async (req, res) => {
 });
 
 // Route pour modifier un stream existant
-app.put('/events/:id/streams/:sid', async (req, res) => {
+app.put('/events/:id/streams/:sid', limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { label, customTitle, customInterval } = req.body;
@@ -606,7 +604,7 @@ app.put('/events/:id/streams/:sid', async (req, res) => {
 });
 
 // Pause d'un flux individuel
-app.post('/events/:id/streams/:sid/pause', async (req, res) => {
+app.post('/events/:id/streams/:sid/pause', limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE streams SET is_paused=TRUE WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);
@@ -623,7 +621,7 @@ app.post('/events/:id/streams/:sid/pause', async (req, res) => {
 });
 
 // Démarrage d'un flux individuel
-app.post('/events/:id/streams/:sid/start', async (req, res) => {
+app.post('/events/:id/streams/:sid/start', limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE streams SET is_paused=FALSE WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);
