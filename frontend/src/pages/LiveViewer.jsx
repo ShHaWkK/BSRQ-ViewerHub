@@ -249,16 +249,11 @@ export default function LiveViewer() {
       if (esRef.current) { try { esRef.current.close(); } catch {} esRef.current = null; }
       const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
       const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-      let base = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
-      if (typeof base === 'string' && base.startsWith('/') && typeof window !== 'undefined') {
-        const port = window.location.port;
-        const devPorts = new Set(['3000', '3001', '3019']);
-        if (devPorts.has(port)) {
-          base = `${proto}//${host}:4000`;
-        }
-      }
+      let base = import.meta.env.VITE_API_URL || '/api';
+      // Toujours préférer une base relative '/api' pour rester même-origine derrière Nginx/proxy
+      // Si une base absolue est fournie via VITE_API_URL, l'utiliser telle quelle
       const url = `${String(base).replace(/\/+$/, '')}/events/${id}/stream`;
-      esRef.current = new EventSource(url, { withCredentials: true });
+      esRef.current = new EventSource(url);
       esRef.current.onopen = () => { sseReconnectAttemptRef.current = 0; };
       esRef.current.onerror = () => {
         try { if (esRef.current) { esRef.current.close(); esRef.current = null; } } catch {}
