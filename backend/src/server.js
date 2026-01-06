@@ -129,9 +129,9 @@ app.get('/auth/magic', (req, res) => {
 });
 
 // Generator route: returns a short alias URL by default
-app.post('/auth/magic', (req, res) => {
+app.post('/auth/magic', requireAuth('admin'), (req, res) => {
   const { redirect, ttlSec, aud } = req.body || {};
-  const audience = (aud || 'admin').toString();
+  const audience = 'admin';
   if (!isSafeRedirect(redirect)) return res.status(400).json({ error: 'redirect invalide' });
   const ttl = Math.max(60, parseInt(ttlSec || 60 * 60 * 24 * 60));
   const token = createToken({ aud: audience }, ttl);
@@ -305,7 +305,7 @@ async function seed() {
 // Routes API
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-app.post('/events', limiterWrites, async (req, res) => {
+app.post('/events', requireAuth('admin'), limiterWrites, async (req, res) => {
   const { name, pollIntervalSec } = req.body;
   const poll = Math.max(2, parseInt(pollIntervalSec || process.env.POLL_INTERVAL_DEFAULT)) * 1000;
   const id = genId();
@@ -330,7 +330,7 @@ app.get('/events/:id', (req, res) => {
 });
 
 // Mettre à jour un événement (nom + intervalle de polling)
-app.put('/events/:id', limiterWrites, async (req, res) => {
+app.put('/events/:id', requireAuth('admin'), limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { name, pollIntervalSec } = req.body || {};
@@ -349,7 +349,7 @@ app.put('/events/:id', limiterWrites, async (req, res) => {
 });
 
 // Suppression (soft-delete) d'un évènement
-app.delete('/events/:id', limiterWrites, async (req, res) => {
+app.delete('/events/:id', requireAuth('admin'), limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE events SET is_deleted=TRUE, deleted_at=NOW() WHERE id=$1', [ev.id]);
@@ -369,7 +369,7 @@ app.delete('/events/:id', limiterWrites, async (req, res) => {
   }
 });
 
-app.post('/events/:id/streams', limiterWrites, async (req, res) => {
+app.post('/events/:id/streams', requireAuth('admin'), limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { label, urlOrId, customTitle, customInterval } = req.body;
@@ -388,7 +388,7 @@ app.post('/events/:id/streams', limiterWrites, async (req, res) => {
   }
 });
 
-app.delete('/events/:id/streams/:sid', limiterWrites, async (req, res) => {
+app.delete('/events/:id/streams/:sid', requireAuth('admin'), limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('DELETE FROM streams WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);
@@ -525,7 +525,7 @@ app.get('/events/:id/history', async (req, res) => {
 });
 
 // Routes pour contrôler la pause/start
-app.post('/events/:id/pause', limiterWrites, async (req, res) => {
+app.post('/events/:id/pause', requireAuth('admin'), limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE events SET is_paused = TRUE WHERE id = $1', [ev.id]);
@@ -536,7 +536,7 @@ app.post('/events/:id/pause', limiterWrites, async (req, res) => {
   }
 });
 
-app.post('/events/:id/start', limiterWrites, async (req, res) => {
+app.post('/events/:id/start', requireAuth('admin'), limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE events SET is_paused = FALSE WHERE id = $1', [ev.id]);
@@ -548,7 +548,7 @@ app.post('/events/:id/start', limiterWrites, async (req, res) => {
 });
 
 // Routes pour gérer les favoris
-app.post('/events/:id/streams/:sid/favorite', limiterWrites, async (req, res) => {
+app.post('/events/:id/streams/:sid/favorite', requireAuth('admin'), limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { is_favorite } = req.body;
@@ -564,7 +564,7 @@ app.post('/events/:id/streams/:sid/favorite', limiterWrites, async (req, res) =>
 });
 
 // Route pour réactiver un stream désactivé
-app.post('/events/:id/streams/:sid/reactivate', limiterWrites, async (req, res) => {
+app.post('/events/:id/streams/:sid/reactivate', requireAuth('admin'), limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE streams SET is_disabled = FALSE, failure_count = 0, last_failure_at = NULL WHERE id = $1 AND event_id = $2', [req.params.sid, ev.id]);
@@ -581,7 +581,7 @@ app.post('/events/:id/streams/:sid/reactivate', limiterWrites, async (req, res) 
 });
 
 // Route pour modifier un stream existant
-app.put('/events/:id/streams/:sid', limiterWrites, async (req, res) => {
+app.put('/events/:id/streams/:sid', requireAuth('admin'), limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     const { label, customTitle, customInterval } = req.body;
@@ -604,7 +604,7 @@ app.put('/events/:id/streams/:sid', limiterWrites, async (req, res) => {
 });
 
 // Pause d'un flux individuel
-app.post('/events/:id/streams/:sid/pause', limiterWrites, async (req, res) => {
+app.post('/events/:id/streams/:sid/pause', requireAuth('admin'), limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE streams SET is_paused=TRUE WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);
@@ -621,7 +621,7 @@ app.post('/events/:id/streams/:sid/pause', limiterWrites, async (req, res) => {
 });
 
 // Démarrage d'un flux individuel
-app.post('/events/:id/streams/:sid/start', limiterWrites, async (req, res) => {
+app.post('/events/:id/streams/:sid/start', requireAuth('admin'), limiterWrites, async (req, res) => {
   try {
     const ev = getEvent(req.params.id);
     await pool.query('UPDATE streams SET is_paused=FALSE WHERE id=$1 AND event_id=$2', [req.params.sid, ev.id]);

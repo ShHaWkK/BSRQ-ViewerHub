@@ -99,19 +99,8 @@ export default function ClientDashboard() {
   // env base
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   const proto = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-  let API_BASE = import.meta.env.VITE_API_URL || `${proto}//${host}:4000`;
-
-  // dev proxy fallback: si API_BASE est relative, basculer vers :4000 sur ports dev
-  if (typeof API_BASE === 'string' && API_BASE.startsWith('/') && typeof window !== 'undefined') {
-    const port = window.location.port;
-    const devPorts = new Set(['3000', '3001', '3019']);
-    if (devPorts.has(port)) API_BASE = `${proto}//${host}:4000`;
-  }
-
-  const SSE_BASE =
-    typeof API_BASE === 'string' && API_BASE.startsWith('/')
-      ? `${proto}//${host}:4000`
-      : API_BASE;
+  let API_BASE = import.meta.env.VITE_API_URL || '/api';
+  const SSE_BASE = API_BASE;
 
   // buffer SSE pour éviter trop de re-render
   const bufferRef = useRef({
@@ -270,13 +259,7 @@ export default function ClientDashboard() {
 
       const params = `minutes=1440`;
       const url = `${String(SSE_BASE).replace(/\/+$/, '')}/events/${id}/stream?${params}`;
-
-      // IMPORTANT: cookies cross-origin si backend le permet
-      try {
-        esRef.current = new EventSource(url, { withCredentials: true });
-      } catch {
-        esRef.current = new EventSource(url);
-      }
+      esRef.current = new EventSource(url);
 
       lastMsgTsRef.current = Date.now();
 

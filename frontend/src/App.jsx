@@ -24,7 +24,7 @@ function App() {
           <Route path="/admin" element={<AdminGate />} />
           <Route path="/admin/event/:id" element={<ProtectedRoute aud="admin"><EventDetail /></ProtectedRoute>} />
           <Route path="/event/:id/dashboard" element={<ProtectedRoute aud="admin"><Dashboard /></ProtectedRoute>} />
-          <Route path="/event/:id/stats" element={<ProtectedRoute aud="client"><Dashboard /></ProtectedRoute>} />
+          <Route path="/event/:id/stats" element={<ProtectedRoute aud="client"><ClientDashboard /></ProtectedRoute>} />
           <Route path="/event/:id/live" element={<ProtectedRoute aud="client"><LiveViewer /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/events" replace />} />
         </Routes>
