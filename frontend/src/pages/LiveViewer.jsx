@@ -232,8 +232,14 @@ export default function LiveViewer() {
   const esRef = useRef(null);
   const sseReconnectAttemptRef = useRef(0);
   const sseReconnectTimerRef = useRef(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
+    let mounted = true;
+    fetch('/api/auth/check?aud=admin', { credentials: 'include' })
+      .then(res => { if (mounted) setIsAdmin(!!res.ok); })
+      .catch(() => { if (mounted) setIsAdmin(false); });
+
     getEvent(id)
       .then(event => {
         setEvent(event);
@@ -293,6 +299,7 @@ export default function LiveViewer() {
     document.addEventListener('visibilitychange', onVis);
     
     return () => {
+      mounted = false;
       document.removeEventListener('visibilitychange', onVis);
       try { if (esRef.current) esRef.current.close(); } catch {}
       esRef.current = null;
@@ -353,7 +360,7 @@ export default function LiveViewer() {
         zIndex: 10 
       }}>
         <Link
-          to={`/event/${event.id}/stats`}
+          to={isAdmin ? `/admin/event/${event.id}` : `/event/${event.id}/stats`}
           style={{
             display: 'inline-flex',
             alignItems: 'center',

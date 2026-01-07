@@ -28,6 +28,159 @@ ChartJS.register(
   Decimation
 );
 
+const DynamicStreamCard = ({ label, current, online }) => {
+  const [displayViewers, setDisplayViewers] = useState(current ?? 0);
+  const [isAnimating, setIsAnimating] = useState(false);
+  useEffect(() => {
+    const cur = typeof current === 'number' ? current : Number(current) || 0;
+    if (cur !== displayViewers) {
+      setIsAnimating(true);
+      const duration = 650;
+      const startTime = Date.now();
+      const startValue = displayViewers;
+      const targetValue = cur;
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const v = Math.round(startValue + (targetValue - startValue) * eased);
+        setDisplayViewers(v);
+        if (progress < 1) requestAnimationFrame(animate);
+        else setIsAnimating(false);
+      };
+      animate();
+    }
+  }, [current]);
+  return (
+    <div
+      className="stream-card"
+      style={{
+        background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
+        backdropFilter: 'blur(10px)',
+        border: '1px solid rgba(255,255,255,0.2)',
+        borderRadius: '16px',
+        padding: '1.5rem',
+        margin: '0.5rem',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        position: 'relative',
+        overflow: 'hidden',
+        transform: 'translateY(0)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = 'translateY(-5px) scale(1.02)';
+        e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.4)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'translateY(0) scale(1)';
+        e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.3)';
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: '-100%',
+          width: '100%',
+          height: '100%',
+          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)',
+          animation: online ? 'shine 3s infinite' : 'none',
+        }}
+      />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: '1rem',
+        }}
+      >
+        <h3
+          style={{
+            margin: 0,
+            fontSize: '1.1rem',
+            fontWeight: '600',
+            background: online
+              ? 'linear-gradient(45deg, #10b981, #3b82f6)'
+              : 'linear-gradient(45deg, #6b7280, #9ca3af)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+          }}
+        >
+          {label}
+        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div
+            style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              backgroundColor: online ? '#10b981' : '#ef4444',
+              animation: online ? 'pulse 2s infinite' : 'none',
+            }}
+          />
+          <span
+            style={{
+              fontSize: '0.8rem',
+              color: online ? '#10b981' : '#ef4444',
+              fontWeight: '500',
+            }}
+          >
+            {online ? 'LIVE' : 'OFFLINE'}
+          </span>
+        </div>
+      </div>
+      <div style={{ textAlign: 'center' }}>
+        <div
+          style={{
+            fontSize: '2rem',
+            fontWeight: '700',
+            background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+            animation: isAnimating ? 'glow 0.45s ease-in-out' : 'none',
+          }}
+        >
+          {displayViewers?.toLocaleString() || 0}
+        </div>
+        <div
+          style={{
+            fontSize: '0.9rem',
+            color: 'rgba(255,255,255,0.7)',
+            marginTop: '0.25rem',
+          }}
+        >
+          spectateurs
+        </div>
+      </div>
+      <div
+        style={{
+          marginTop: '1rem',
+          height: '4px',
+          backgroundColor: 'rgba(255,255,255,0.1)',
+          borderRadius: '2px',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            height: '100%',
+            background: online
+              ? 'linear-gradient(90deg, #10b981, #3b82f6)'
+              : 'linear-gradient(90deg, #6b7280, #9ca3af)',
+            borderRadius: '2px',
+            width: `${Math.min(100, (displayViewers / 50000) * 100)}%`,
+            transition: 'width 350ms cubic-bezier(0.4, 0, 0.2, 1)',
+            boxShadow: online ? '0 0 10px rgba(16, 185, 129, 0.5)' : 'none',
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
 const ParticleSystem = () => {
   const canvasRef = useRef(null);
   const particlesRef = useRef([]);
@@ -163,6 +316,8 @@ export default function ClientDashboard() {
 
   const [event, setEvent] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [streamsHistory, setStreamsHistory] = useState({});
+  const createdAtRef = useRef(null);
 
   // total + delta
   const [totalViewers, setTotalViewers] = useState(0);
@@ -236,10 +391,31 @@ export default function ClientDashboard() {
         if (!mounted) return;
 
         setEvent(ev);
+        createdAtRef.current = ev?.created_at || null;
 
         const tot = safeNum(ev?.state?.total, 0);
         setPreviousTotal(tot);
         setTotalViewers(tot);
+
+        try {
+          const url = `/api/events/${id}/history?minutes=1440&streams=1&limit=5000`;
+          const res = await fetch(url, { credentials: 'include' });
+          if (res.ok) {
+            const data = await res.json();
+            if (!mounted) return;
+            if (Array.isArray(data.history)) setHistory(data.history);
+            if (Array.isArray(data.streams)) {
+              const grouped = {};
+              for (const row of data.streams) {
+                const sid = row.stream_id;
+                const arr = grouped[sid] || [];
+                arr.push({ ts: row.ts, current: row.concurrent_viewers });
+                grouped[sid] = arr;
+              }
+              setStreamsHistory(grouped);
+            }
+          }
+        } catch {}
       } catch {
         // silencieux: SSE/poll prendront le relai
       }
@@ -470,6 +646,31 @@ export default function ClientDashboard() {
 
   // --------- chart models
   const reducedHistory = useMemo(() => reduceSeriesKeepLast(history, 3000), [history]);
+  const xBounds = useMemo(() => {
+    const now = new Date();
+    let t = Infinity;
+    if (Array.isArray(history) && history.length) {
+      for (const row of history) {
+        const ts = new Date(row.ts).getTime();
+        if (Number.isFinite(ts) && ts < t) t = ts;
+      }
+    }
+    if (!isFinite(t)) {
+      if (createdAtRef.current) return { xMin: new Date(createdAtRef.current), xMax: now };
+      return { xMin: new Date(Date.now() - 3 * 60 * 60 * 1000), xMax: now };
+    }
+    return { xMin: new Date(t), xMax: now };
+  }, [history]);
+  const timeUnit = useMemo(() => {
+    const totalMinutes = Math.max(1, Math.round((xBounds.xMax.getTime() - xBounds.xMin.getTime()) / 60000));
+    return totalMinutes >= 1440 ? 'day' : totalMinutes >= 360 ? 'hour' : 'minute';
+  }, [xBounds]);
+  const totalVisiblePoints = useMemo(() => {
+    return reducedHistory
+      .map((p) => ({ x: new Date(p.ts), y: safeNum(p.total, 0) }))
+      .filter((p) => Number.isFinite(p.x.valueOf()) && Number.isFinite(p.y))
+      .filter((p) => p.x >= xBounds.xMin && p.x <= xBounds.xMax);
+  }, [reducedHistory, xBounds]);
 
   const chartData = useMemo(() => {
     return {
@@ -477,9 +678,7 @@ export default function ClientDashboard() {
         {
           id: 'total',
           label: 'Spectateurs',
-          data: reducedHistory
-            .map((p) => ({ x: new Date(p.ts), y: safeNum(p.total, 0) }))
-            .filter((p) => Number.isFinite(p.x.valueOf()) && Number.isFinite(p.y)),
+          data: totalVisiblePoints,
           borderColor: '#3b82f6',
           backgroundColor: 'rgba(59,130,246,0.18)',
           fill: true,
@@ -488,9 +687,12 @@ export default function ClientDashboard() {
         },
       ],
     };
-  }, [reducedHistory]);
+  }, [totalVisiblePoints]);
 
   const chartOptions = useMemo(() => {
+    const ys = totalVisiblePoints.map((p) => safeNum(p.y, 0));
+    const maxY = ys.length ? Math.max(10, ...ys) : 10;
+    const minY = ys.length ? Math.min(...ys) : 0;
     return {
       responsive: true,
       maintainAspectRatio: false,
@@ -499,24 +701,26 @@ export default function ClientDashboard() {
       plugins: {
         legend: { display: false },
         tooltip: { mode: 'nearest', intersect: false },
-        // IMPORTANT: pas de decimation ici (sinon impression freeze)
         decimation: { enabled: false },
       },
       scales: {
         x: {
           type: 'time',
-          time: { unit: 'minute' },
+          time: { unit: timeUnit },
+          min: xBounds.xMin,
+          max: xBounds.xMax,
           grid: { display: false },
           ticks: { color: 'rgba(255,255,255,0.75)' },
         },
         y: {
-          beginAtZero: true,
+          suggestedMin: Math.max(0, minY - Math.round(maxY * 0.05)),
+          suggestedMax: Math.round(maxY * 1.05),
           grid: { color: 'rgba(255,255,255,0.1)' },
           ticks: { color: 'rgba(255,255,255,0.75)' },
         },
       },
     };
-  }, []);
+  }, [timeUnit, xBounds, totalVisiblePoints]);
 
   // force redraw sur changement de série (sécurise les builds “qui figent”)
   useEffect(() => {
@@ -555,6 +759,29 @@ export default function ClientDashboard() {
           >
             ← Retour à l'évènement
           </Link>
+        </div>
+
+        <div style={{ padding: isMobile ? '0.75rem 0' : '1.5rem 0' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: '1rem',
+              marginBottom: '0.5rem',
+            }}
+          >
+            {(event?.streams || []).map((s) => {
+              const st = event?.state?.streams?.[s.id];
+              return (
+                <DynamicStreamCard
+                  key={s.id}
+                  label={s.label}
+                  current={safeNum(st?.current, 0)}
+                  online={!!st?.online}
+                />
+              );
+            })}
+          </div>
         </div>
 
         <div
