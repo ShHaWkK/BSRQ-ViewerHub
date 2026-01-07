@@ -273,6 +273,7 @@ const EventCard = ({ event, index, onEdit, onDelete, onCopyMagic, onCopyMagicCli
           </div>
 
           <button
+            type="button"
             onClick={() => onEdit(event)}
             style={{
               background: 'linear-gradient(45deg, #f59e0b, #ef4444)',
@@ -299,6 +300,7 @@ const EventCard = ({ event, index, onEdit, onDelete, onCopyMagic, onCopyMagicCli
           </button>
 
           <button
+            type="button"
             onClick={() => onDelete(event)}
             style={{
               background: 'linear-gradient(45deg, #ef4444, #b91c1c)',
@@ -743,6 +745,7 @@ export default function Admin() {
                     setConfirmCountdown(0);
                     setEditOpen(true);
                   }} onDelete={(ev) => {
+                    setEditOpen(false);
                     setDeleteTarget(ev);
                     setDeleteError('');
                     setDeleteOpen(true);
@@ -826,42 +829,7 @@ export default function Admin() {
             }}
       />
 
-      {/* Modal de confirmation de suppression */}
-      <Modal
-        isOpen={deleteOpen}
-        title={deleteTarget ? `🗑️ Supprimer "${deleteTarget.name}" ?` : '🗑️ Supprimer cet évènement ?'}
-        onClose={() => {
-          setDeleteOpen(false);
-          setDeleteTarget(null);
-        }}
-        confirmText={deleteSubmitting ? 'Suppression…' : 'Confirmer'}
-        isSubmitting={deleteSubmitting}
-        onConfirm={async () => {
-          if (!deleteTarget) return;
-          setDeleteSubmitting(true);
-          setDeleteError('');
-          try {
-            await deleteEvent(deleteTarget.id);
-            setEvents((prev) => prev.filter((e) => e.id !== deleteTarget.id));
-            setDeleteOpen(false);
-            setDeleteTarget(null);
-          } catch (e) {
-            console.error('Suppression échouée:', e);
-            setDeleteError(e.message || 'Erreur lors de la suppression');
-          } finally {
-            setDeleteSubmitting(false);
-          }
-        }}
-      >
-        <div style={{ color: 'rgba(255,255,255,0.85)' }}>
-          Cette action supprime l’évènement de la liste et met fin aux mises à jour en temps réel. Les données historiques restent conservées.
-          {deleteError && (
-            <div style={{ marginTop: '0.75rem', color: '#ef4444', fontWeight: 600 }}>
-              {deleteError}
-            </div>
-          )}
-        </div>
-      </Modal>
+      
 
       {/* Toast */}
       {toast && (
@@ -924,6 +892,42 @@ export default function Admin() {
             ⚠️ {editError}
           </div>
         )}
+      </Modal>
+
+      <Modal
+        isOpen={deleteOpen}
+        title={deleteTarget ? `🗑️ Supprimer "${deleteTarget.name}" ?` : '🗑️ Supprimer cet évènement ?'}
+        onClose={() => {
+          setDeleteOpen(false);
+          setDeleteTarget(null);
+        }}
+        confirmText={deleteSubmitting ? 'Suppression…' : 'Confirmer'}
+        isSubmitting={deleteSubmitting}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeleteSubmitting(true);
+          setDeleteError('');
+          try {
+            await deleteEvent(deleteTarget.id);
+            setEvents((prev) => prev.filter((e) => e.id !== deleteTarget.id));
+            setDeleteOpen(false);
+            setDeleteTarget(null);
+          } catch (e) {
+            console.error('Suppression échouée:', e);
+            setDeleteError(e.message || 'Erreur lors de la suppression');
+          } finally {
+            setDeleteSubmitting(false);
+          }
+        }}
+      >
+        <div style={{ color: 'rgba(255,255,255,0.85)' }}>
+          Cette action supprime l’évènement de la liste et met fin aux mises à jour en temps réel. Les données historiques restent conservées.
+          {deleteError && (
+            <div style={{ marginTop: '0.75rem', color: '#ef4444', fontWeight: 600 }}>
+              {deleteError}
+            </div>
+          )}
+        </div>
       </Modal>
 
       {/* CSS Animations */}

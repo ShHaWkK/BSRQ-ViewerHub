@@ -71,7 +71,7 @@ export async function getEvent(id) {
 }
 
 export async function deleteEvent(id) {
-  const res = await fetchWithFallback(`/events/${id}`, { method: 'DELETE' });
+  const res = await fetchWithFallback(`/events/${id}`, { method: 'DELETE', credentials: 'include' });
   if (!res.ok && res.status !== 204) {
     const text = await res.text().catch(() => '');
     throw new Error(`DELETE /events/${id} -> HTTP ${res.status}: ${text.slice(0, 200)}`);
