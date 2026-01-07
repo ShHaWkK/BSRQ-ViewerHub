@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Link } from 'react-router-dom';
-import { getEvents, createEvent, updateEvent, deleteEvent, generateMagicLink } from '../api.js';
+import { Link, useNavigate } from 'react-router-dom';
+import { getEvents, createEvent, updateEvent, deleteEvent, generateMagicLink, logout } from '../api.js';
 import Modal from '../components/Modal.jsx';
 import customLogo from '../assets/custom-logo.svg';
 
@@ -330,6 +330,7 @@ const EventCard = ({ event, index, onEdit, onDelete, onCopyMagic, onCopyMagicCli
 };
 
 export default function Admin() {
+  const navigate = useNavigate();
   const [events, setEvents] = useState([]);
   const [form, setForm] = useState({ name: '', pollIntervalSec: '5' });
   const [isLoading, setIsLoading] = useState(true);
@@ -443,6 +444,35 @@ export default function Admin() {
       <AnimatedBackground />
       
       <div style={{ position: 'relative', zIndex: 10, padding: '2rem' }}>
+        <div style={{ position: 'absolute', top: '1.5rem', right: '1.5rem' }}>
+          <button
+            onClick={async () => {
+              try { await logout(); } catch {}
+              try { navigate('/login?aud=admin', { replace: true }); } catch { window.location.assign('/login?aud=admin'); }
+            }}
+            style={{
+              background: 'linear-gradient(45deg, #ef4444, #b91c1c)',
+              color: 'white',
+              border: 'none',
+              padding: '0.6rem 1rem',
+              borderRadius: '12px',
+              fontWeight: '600',
+              boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.boxShadow = '0 8px 25px rgba(239, 68, 68, 0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
+            }}
+          >
+            Déconnexion
+          </button>
+        </div>
         {/* En-tête */}
         <header style={{
           textAlign: 'center',

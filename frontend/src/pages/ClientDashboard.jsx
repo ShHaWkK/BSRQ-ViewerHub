@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -14,7 +14,7 @@ import {
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 
-import { getEvent } from '../api.js';
+import { getEvent, logout } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
 ChartJS.register(
@@ -313,6 +313,7 @@ const reduceSeriesKeepLast = (rows, MAX_POINTS = 3000) => {
 
 export default function ClientDashboard() {
   const { id } = useParams();
+  const navigate = useNavigate();
 
   const [event, setEvent] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -771,6 +772,33 @@ export default function ClientDashboard() {
           >
             ← Retour à l'évènement
           </Link>
+          <button
+            onClick={async () => {
+              try { await logout(); } catch {}
+              try { navigate('/login?aud=client', { replace: true }); } catch { window.location.assign('/login?aud=client'); }
+            }}
+            style={{
+              background: 'linear-gradient(45deg, #ef4444, #b91c1c)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '12px',
+              padding: '0.6rem 1rem',
+              fontWeight: '600',
+              boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+              transition: 'all 0.3s ease',
+              cursor: 'pointer'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 8px 25px rgba(239, 68, 68, 0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
+            }}
+          >
+            Déconnexion
+          </button>
         </div>
 
         <div

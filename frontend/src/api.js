@@ -192,3 +192,11 @@ export async function generateMagicLink(redirect, ttlSec = 60 * 60 * 24 * 60, au
   if (!data?.url) throw new Error('Réponse invalide lors de la génération du magic link');
   return data.url;
 }
+
+export async function logout() {
+  const res = await fetchWithFallback('/auth/logout', {
+    method: 'POST',
+    credentials: 'include'
+  });
+  return readJsonOrThrow(res);
+}

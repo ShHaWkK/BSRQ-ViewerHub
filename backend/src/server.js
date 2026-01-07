@@ -87,6 +87,17 @@ function setAuthCookie(res, token, req) {
   });
 }
 
+function clearAuthCookie(res, req) {
+  const viaHttps = (req?.secure) || (req?.headers?.['x-forwarded-proto'] === 'https');
+  res.cookie('auth', '', {
+    httpOnly: true,
+    secure: !!viaHttps,
+    sameSite: 'lax',
+    maxAge: 0,
+    path: '/',
+  });
+}
+
 function requireAuth(aud) {
   return (req, res, next) => {
     const token = getCookie(req, 'auth');
@@ -115,6 +126,11 @@ app.post('/auth/login', limiterLogin, (req, res) => {
   const token = createToken({ aud });
   setAuthCookie(res, token, req);
   res.json({ ok: true, aud });
+});
+
+app.post('/auth/logout', (req, res) => {
+  clearAuthCookie(res, req);
+  res.json({ ok: true });
 });
 
 // Redemption route: GET /auth/magic?token=...&redirect=/...

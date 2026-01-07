@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { getEvent, addStream, removeStream, pauseEvent, startEvent, reactivateStream, updateStream, pauseStream, startStream, toggleStreamFavorite, getYoutubeTitle } from '../api.js';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { getEvent, addStream, removeStream, pauseEvent, startEvent, reactivateStream, updateStream, pauseStream, startStream, toggleStreamFavorite, getYoutubeTitle, logout } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
 // Composant de particules flottantes
@@ -431,6 +431,7 @@ const StreamItem = ({ stream, onDelete, onReactivate, onUpdate, onPauseStream, o
 };
 
 export default function EventDetail() {
+  const navigate = useNavigate();
   const { id } = useParams();
   const [event, setEvent] = useState(null);
   const [form, setForm] = useState({ label: '', urlOrId: '', customTitle: '', customInterval: '' });
@@ -609,6 +610,35 @@ export default function EventDetail() {
       <FloatingParticles />
       
       <div style={{ position: 'relative', zIndex: 10, padding: '2rem' }}>
+        <div style={{ position: 'absolute', top: '2rem', right: '2rem' }}>
+          <button
+            onClick={async () => {
+              try { await logout(); } catch {}
+              try { navigate('/login?aud=admin', { replace: true }); } catch { window.location.assign('/login?aud=admin'); }
+            }}
+            style={{
+              background: 'linear-gradient(45deg, #ef4444, #b91c1c)',
+              color: 'white',
+              border: 'none',
+              padding: '0.6rem 1rem',
+              borderRadius: '12px',
+              fontWeight: '600',
+              boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.boxShadow = '0 8px 25px rgba(239, 68, 68, 0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
+            }}
+          >
+            Déconnexion
+          </button>
+        </div>
         {/* Bouton de retour */}
         <div style={{ marginBottom: '2rem' }}>
           <Link
