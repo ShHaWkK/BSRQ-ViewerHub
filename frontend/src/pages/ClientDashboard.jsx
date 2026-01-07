@@ -604,6 +604,18 @@ export default function ClientDashboard() {
           const ts = msg?.data?.ts ? new Date(msg.data.ts).toISOString() : new Date().toISOString();
           const tot = safeNum(msg?.data?.total, 0);
 
+          const streamsArr = Array.isArray(msg?.data?.streams) ? msg.data.streams : [];
+          const streamsObj = Object.fromEntries(
+            streamsArr.map((s) => [
+              s.id,
+              { id: s.id, current: safeNum(s?.current, 0), online: !!s?.online },
+            ])
+          );
+          setEvent((e) => {
+            const prev = e || {};
+            return { ...prev, state: { total: tot, streams: streamsObj } };
+          });
+
           // buffer total + point
           bufferRef.current.lastTotal = tot;
           bufferRef.current.points.push({ ts, total: tot });
@@ -761,29 +773,6 @@ export default function ClientDashboard() {
           </Link>
         </div>
 
-        <div style={{ padding: isMobile ? '0.75rem 0' : '1.5rem 0' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gap: '1rem',
-              marginBottom: '0.5rem',
-            }}
-          >
-            {(event?.streams || []).map((s) => {
-              const st = event?.state?.streams?.[s.id];
-              return (
-                <DynamicStreamCard
-                  key={s.id}
-                  label={s.label}
-                  current={safeNum(st?.current, 0)}
-                  online={!!st?.online}
-                />
-              );
-            })}
-          </div>
-        </div>
-
         <div
           style={{
             background: 'rgba(255, 255, 255, 0.1)',
@@ -912,6 +901,30 @@ export default function ClientDashboard() {
             </div>
           </div>
         </div>
+
+        <div style={{ padding: isMobile ? '1.25rem 0 0.75rem' : '2rem 0 1rem' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: '1rem',
+              marginBottom: '0.5rem',
+            }}
+          >
+            {(event?.streams || []).map((s) => {
+              const st = event?.state?.streams?.[s.id];
+              return (
+                <DynamicStreamCard
+                  key={s.id}
+                  label={s.label}
+                  current={safeNum(st?.current, 0)}
+                  online={!!st?.online}
+                />
+              );
+            })}
+          </div>
+        </div>
+
       </div>
     </div>
   );
