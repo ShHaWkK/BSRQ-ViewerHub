@@ -8,6 +8,7 @@ export default function ClientHome() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('all'); // all | active | paused
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -18,6 +19,13 @@ export default function ClientHome() {
     return () => { mounted = false; };
   }, []);
 
+  useEffect(() => {
+    const mql = window.matchMedia('(max-width: 640px)');
+    const handler = () => setIsMobile(mql.matches);
+    handler();
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
   const filtered = events.filter(ev => {
     if (filter === 'active') return !ev.is_paused;
     if (filter === 'paused') return !!ev.is_paused;
@@ -98,7 +106,7 @@ export default function ClientHome() {
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+        gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))',
         gap: '1rem',
       }}
     >

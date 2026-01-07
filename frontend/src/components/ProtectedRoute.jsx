@@ -14,7 +14,7 @@ export default function ProtectedRoute({ children, aud = 'admin' }) {
       const tries = [0, 350, 1000];
       for (let i = 0; i < tries.length; i++) {
         try {
-          const res = await fetch(url, { credentials: 'same-origin' });
+          const res = await fetch(url, { credentials: 'include' });
           if (!mounted) return;
           if (res.ok) { setState('ok'); return; }
         } catch {}
@@ -24,7 +24,7 @@ export default function ProtectedRoute({ children, aud = 'admin' }) {
       // Fallback: autoriser un admin à accéder aux routes client
       if (mounted && aud === 'client') {
         try {
-          const adminRes = await fetch('/api/auth/check?aud=admin', { credentials: 'same-origin' });
+          const adminRes = await fetch('/api/auth/check?aud=admin', { credentials: 'include' });
           if (adminRes.ok) { setState('ok'); return; }
         } catch {}
       }

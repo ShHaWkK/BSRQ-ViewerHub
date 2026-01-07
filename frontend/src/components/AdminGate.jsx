@@ -12,8 +12,8 @@ export default function AdminGate() {
   useEffect(() => {
     let mounted = true;
     Promise.all([
-      fetch('/api/auth/check?aud=admin', { credentials: 'same-origin' }),
-      fetch('/api/auth/check?aud=client', { credentials: 'same-origin' })
+      fetch('/api/auth/check?aud=admin', { credentials: 'include' }),
+      fetch('/api/auth/check?aud=client', { credentials: 'include' })
     ])
       .then(([adminRes, clientRes]) => {
         if (!mounted) return;

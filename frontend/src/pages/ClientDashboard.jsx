@@ -28,6 +28,92 @@ ChartJS.register(
   Decimation
 );
 
+const ParticleSystem = () => {
+  const canvasRef = useRef(null);
+  const particlesRef = useRef([]);
+  const animationRef = useRef(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) return;
+    const ctx = canvas.getContext('2d');
+    const updateCanvasSize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    const createParticles = () => {
+      particlesRef.current = [];
+      const base = 24;
+      for (let i = 0; i < base; i++) {
+        particlesRef.current.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 1,
+          vy: (Math.random() - 0.5) * 1,
+          size: Math.random() * 2 + 1,
+          opacity: Math.random() * 0.3 + 0.1,
+          hue: Math.random() * 360,
+        });
+      }
+    };
+    const animate = () => {
+      if (document.hidden) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      particlesRef.current.forEach((p) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.hue += 0.5;
+        if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+        if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${p.hue}, 70%, 60%, ${p.opacity})`;
+        ctx.fill();
+      });
+      animationRef.current = requestAnimationFrame(animate);
+    };
+    updateCanvasSize();
+    createParticles();
+    animate();
+    const handleResize = () => {
+      updateCanvasSize();
+      createParticles();
+    };
+    const handleVisibility = () => {
+      if (!document.hidden && !animationRef.current) {
+        animate();
+      }
+      if (document.hidden && animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    };
+  }, []);
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        zIndex: 0,
+        opacity: 0.2,
+      }}
+    />
+  );
+};
 // compat react-chartjs-2 ref: parfois { chart }, parfois directement le chart
 const getChartInstance = (refObj) => {
   const r = refObj?.current;
@@ -76,6 +162,7 @@ export default function ClientDashboard() {
   const { id } = useParams();
 
   const [event, setEvent] = useState(null);
+  const [isMobile, setIsMobile] = useState(false);
 
   // total + delta
   const [totalViewers, setTotalViewers] = useState(0);
@@ -107,6 +194,14 @@ export default function ClientDashboard() {
     lastTotal: null,
     points: [], // [{ts,total}]
   });
+
+  useEffect(() => {
+    const mql = window.matchMedia('(max-width: 640px)');
+    const handler = () => setIsMobile(mql.matches);
+    handler();
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
 
   const cleanupSSE = () => {
     try {
@@ -434,6 +529,7 @@ export default function ClientDashboard() {
   return (
     <div className="app-bg">
       <div className="container" style={{ paddingTop: '6vh' }}>
+        <ParticleSystem />
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
           <Link
             to="/events"
@@ -457,7 +553,7 @@ export default function ClientDashboard() {
               e.currentTarget.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
             }}
           >
-            ← Retour aux évènements
+            ← Retour à l'évènement
           </Link>
         </div>
 
@@ -495,19 +591,15 @@ export default function ClientDashboard() {
               (mise à jour auto, aucun refresh)
             </span>
           </div>
-        </div>
-
-        {/* total card */}
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'stretch', marginTop: '1.5rem' }}>
           <div
             style={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
-              backdropFilter: 'blur(10px)',
-              border: '1px solid rgba(255,255,255,0.2)',
+              background: 'linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255,255,255,0.3)',
               borderRadius: '20px',
               padding: '2rem',
               maxWidth: '420px',
-              width: '100%',
+              margin: '1rem auto 0',
               boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
             }}
           >
@@ -520,9 +612,8 @@ export default function ClientDashboard() {
                 letterSpacing: '1px',
               }}
             >
-              TOTAL SPECTATEURS
+              Total Spectateurs
             </div>
-
             <div
               style={{
                 fontSize: '3.5rem',
@@ -536,55 +627,32 @@ export default function ClientDashboard() {
             >
               {safeNum(totalViewers, 0).toLocaleString()}
             </div>
-
             {totalViewers > previousTotal && (
               <div style={{ color: '#10b981', fontSize: '0.9rem', marginTop: '0.5rem' }}>
                 📈 +{(totalViewers - previousTotal).toLocaleString()}
               </div>
             )}
           </div>
-
-          {/* petite carte info event optionnelle */}
-          <div
-            style={{
-              flex: 1,
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: 20,
-              padding: '2rem',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-              display: 'flex',
-              alignItems: 'center',
-              minHeight: 140,
-            }}
-          >
-            <div style={{ opacity: 0.9 }}>
-              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>
-                {event?.name || `Évènement ${id}`}
-              </div>
-              <div style={{ color: 'rgba(255,255,255,0.75)' }}>
-                Les chiffres se mettent à jour automatiquement en temps réel.
-              </div>
-            </div>
-          </div>
         </div>
 
+        <div style={{ marginTop: isMobile ? '0.75rem' : '1.5rem' }} />
+
         {/* chart */}
-        <div style={{ padding: '2rem 0 1rem' }}>
+        <div style={{ padding: isMobile ? '1.25rem 0 0.75rem' : '2rem 0 1rem' }}>
           <div
             style={{
               background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
               backdropFilter: 'blur(10px)',
               border: '1px solid rgba(255,255,255,0.2)',
               borderRadius: '20px',
-              padding: '2rem',
+              padding: isMobile ? '1.25rem' : '2rem',
               boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
             }}
           >
             <h3
               style={{
                 margin: '0 0 1.5rem 0',
-                fontSize: '1.5rem',
+                fontSize: isMobile ? '1.25rem' : '1.5rem',
                 fontWeight: '600',
                 background: 'linear-gradient(45deg, #0c2164ff, #3b82f6)',
                 WebkitBackgroundClip: 'text',
@@ -595,7 +663,7 @@ export default function ClientDashboard() {
               📈 Évolution Temps Réel
             </h3>
 
-            <div style={{ height: '320px', position: 'relative' }}>
+            <div style={{ height: isMobile ? '240px' : '320px', position: 'relative' }}>
               <Line ref={chartRef} data={chartData} options={chartOptions} datasetIdKey="id" />
               {reducedHistory.length === 0 && (
                 <div

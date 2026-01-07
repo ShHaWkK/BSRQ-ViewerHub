@@ -15,7 +15,7 @@ export default function Login({ forceAud, forceRedirect }) {
   useEffect(() => {
     let mounted = true;
     if (audParam === 'admin') {
-      fetch('/api/auth/check?aud=client', { credentials: 'same-origin' })
+      fetch('/api/auth/check?aud=client', { credentials: 'include' })
         .then(res => {
           if (!mounted) return;
           if (res.ok) {
@@ -50,7 +50,7 @@ export default function Login({ forceAud, forceRedirect }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
-        credentials: 'same-origin'
+        credentials: 'include'
       });
       if (!res.ok) {
         setError('Mot de passe invalide');
@@ -69,7 +69,7 @@ export default function Login({ forceAud, forceRedirect }) {
         const check = async () => {
           try {
             const chk = await fetch(`/api/auth/check?aud=${encodeURIComponent(wantedAud)}`, {
-              credentials: 'same-origin',
+              credentials: 'include',
               cache: 'no-store',
             });
             return !!chk.ok;
