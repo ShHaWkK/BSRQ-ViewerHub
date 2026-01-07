@@ -434,36 +434,67 @@ export default function ClientDashboard() {
   return (
     <div className="app-bg">
       <div className="container" style={{ paddingTop: '6vh' }}>
-        {/* header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <Link
+            to="/events"
+            style={{
+              background: 'linear-gradient(45deg, #8b5cf6, #3b82f6)',
+              border: 'none',
+              borderRadius: '12px',
+              padding: '0.6rem 1rem',
+              color: 'white',
+              textDecoration: 'none',
+              fontWeight: '600',
+              boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+              transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 8px 25px rgba(139, 92, 246, 0.3)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
+            }}
+          >
+            ← Retour aux évènements
+          </Link>
+        </div>
+
         <div
-          className="hero"
           style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 12,
+            background: 'rgba(255, 255, 255, 0.1)',
+            backdropFilter: 'blur(10px)',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
+            borderRadius: '20px',
+            padding: '2rem 1rem',
+            textAlign: 'center',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <img src={bsrqLogo} alt="BSRQ" style={{ height: '40px' }} />
-            <div>
-              <h1 className="gradient-text" style={{ margin: 0, fontSize: '2rem' }}>
-                Dashboard Live
-              </h1>
-              <div style={{ opacity: 0.85, fontWeight: 600, marginTop: 6 }}>
-                {sseStatus === 'live' && <span style={{ color: '#10b981' }}>LIVE</span>}
-                {sseStatus === 'connecting' && <span style={{ color: '#f59e0b' }}>Connexion…</span>}
-                {sseStatus === 'reconnecting' && <span style={{ color: '#f59e0b' }}>Reconnexion…</span>}
-                <span style={{ color: 'rgba(255,255,255,0.65)', marginLeft: 10 }}>
-                  (mise à jour auto, aucun refresh)
-                </span>
-              </div>
-            </div>
+          <div style={{ marginBottom: '1rem' }}>
+            <img src={bsrqLogo} alt="BSRQ" style={{ height: '60px' }} />
           </div>
-
-          <Link to="/events" className="btn btn--brand-gb">
-            Retour
-          </Link>
+          <h1
+            style={{
+              margin: '0 0 0.6rem 0',
+              fontSize: '2.5rem',
+              fontWeight: '700',
+              background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+            }}
+          >
+            📊 Dashboard Live
+          </h1>
+          <div style={{ opacity: 0.85, fontWeight: 600 }}>
+            {sseStatus === 'live' && <span style={{ color: '#10b981' }}>LIVE</span>}
+            {sseStatus === 'connecting' && <span style={{ color: '#f59e0b' }}>Connexion…</span>}
+            {sseStatus === 'reconnecting' && <span style={{ color: '#f59e0b' }}>Reconnexion…</span>}
+            <span style={{ color: 'rgba(255,255,255,0.65)', marginLeft: 10 }}>
+              (mise à jour auto, aucun refresh)
+            </span>
+          </div>
         </div>
 
         {/* total card */}
