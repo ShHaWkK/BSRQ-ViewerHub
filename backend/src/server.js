@@ -118,11 +118,17 @@ app.get('/auth/check', (req, res) => {
 });
 
 app.post('/auth/login', limiterLogin, (req, res) => {
-  const { password } = req.body || {};
+  const { password, aud: requestedAud } = req.body || {};
   let aud;
-  if (ADMIN_PASSWORD && password === ADMIN_PASSWORD) aud = 'admin';
-  else if (CLIENT_PASSWORD && password === CLIENT_PASSWORD) aud = 'client';
-  else return res.status(401).json({ ok: false });
+  if (requestedAud === 'client') {
+    // Connexion client : vérifie uniquement le mot de passe client
+    if (CLIENT_PASSWORD && password === CLIENT_PASSWORD) aud = 'client';
+    else return res.status(401).json({ ok: false });
+  } else {
+    // Connexion admin (par défaut) : vérifie uniquement le mot de passe admin
+    if (ADMIN_PASSWORD && password === ADMIN_PASSWORD) aud = 'admin';
+    else return res.status(401).json({ ok: false });
+  }
   const token = createToken({ aud });
   setAuthCookie(res, token, req);
   res.json({ ok: true, aud });

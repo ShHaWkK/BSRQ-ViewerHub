@@ -49,7 +49,7 @@ export default function Login({ forceAud, forceRedirect }) {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password, aud: audParam }),
         credentials: 'include'
       });
       if (!res.ok) {
@@ -147,26 +147,34 @@ export default function Login({ forceAud, forceRedirect }) {
           padding: '40px 36px',
           boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
         }}>
-          {/* Logo */}
-          <div style={{ textAlign: 'center', marginBottom: 28 }}>
-            <img src={bsrqLogo} alt="BSRQ" style={{ height: 52, marginBottom: 20 }} />
+          {/* Logo + badge */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 16,
+            marginBottom: 28,
+          }}>
+            <img
+              src={bsrqLogo}
+              alt="BSRQ"
+              style={{ maxHeight: 48, maxWidth: '100%', objectFit: 'contain' }}
+            />
             <div style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: 8,
-              background: isAdmin
-                ? 'rgba(139,92,246,0.15)'
-                : 'rgba(59,130,246,0.12)',
+              background: isAdmin ? 'rgba(139,92,246,0.15)' : 'rgba(59,130,246,0.12)',
               border: `1px solid ${isAdmin ? 'rgba(139,92,246,0.3)' : 'rgba(59,130,246,0.25)'}`,
               borderRadius: 999,
               padding: '6px 16px',
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: 700,
               color: isAdmin ? '#c4b5fd' : '#93c5fd',
-              letterSpacing: '0.05em',
+              letterSpacing: '0.06em',
               textTransform: 'uppercase',
             }}>
-              <span>{isAdmin ? '⚙' : '◉'}</span>
+              <span style={{ fontSize: 10 }}>{isAdmin ? '⚙' : '●'}</span>
               {isAdmin ? 'Espace Admin' : 'Espace Client'}
             </div>
           </div>

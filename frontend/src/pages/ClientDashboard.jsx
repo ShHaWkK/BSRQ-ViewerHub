@@ -51,131 +51,81 @@ const DynamicStreamCard = ({ label, current, online }) => {
       animate();
     }
   }, [current]);
+
   return (
-    <div
-      className="stream-card"
-      style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(255,255,255,0.2)',
-        borderRadius: '16px',
-        padding: '1.5rem',
-        margin: '0.5rem',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-        position: 'relative',
-        overflow: 'hidden',
-        transform: 'translateY(0)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translateY(-5px) scale(1.02)';
-        e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.4)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = 'translateY(0) scale(1)';
-        e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.3)';
-      }}
+    <div style={{
+      background: online
+        ? 'linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(59,130,246,0.06) 100%)'
+        : 'rgba(255,255,255,0.02)',
+      border: `1px solid ${online ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.06)'}`,
+      borderRadius: 16,
+      padding: '1.25rem 1.5rem',
+      transition: 'transform 0.2s, box-shadow 0.2s',
+      position: 'relative',
+      overflow: 'hidden',
+    }}
+    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(0,0,0,0.3)'; }}
+    onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
     >
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: '-100%',
-          width: '100%',
-          height: '100%',
-          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)',
-          animation: online ? 'shine 3s infinite' : 'none',
-        }}
-      />
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: '1rem',
-        }}
-      >
-        <h3
-          style={{
-            margin: 0,
-            fontSize: '1.1rem',
-            fontWeight: '600',
-            background: online
-              ? 'linear-gradient(45deg, #10b981, #3b82f6)'
-              : 'linear-gradient(45deg, #6b7280, #9ca3af)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            backgroundClip: 'text',
-          }}
-        >
+      {/* shine pour les streams online */}
+      {online && (
+        <div style={{
+          position: 'absolute', top: 0, left: '-100%',
+          width: '100%', height: '100%',
+          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent)',
+          animation: 'shine 3s infinite',
+          pointerEvents: 'none',
+        }} />
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+        <span style={{
+          fontSize: 14,
+          fontWeight: 600,
+          color: online ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.35)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%',
+        }}>
           {label}
-        </h3>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <div
-            style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: online ? '#10b981' : '#ef4444',
-              animation: online ? 'pulse 2s infinite' : 'none',
-            }}
-          />
-          <span
-            style={{
-              fontSize: '0.8rem',
-              color: online ? '#10b981' : '#ef4444',
-              fontWeight: '500',
-            }}
-          >
-            {online ? 'LIVE' : 'OFFLINE'}
-          </span>
-        </div>
+        </span>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+          color: online ? '#34d399' : '#6b7280',
+        }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: online ? '#10b981' : '#4b5563',
+            boxShadow: online ? '0 0 6px #10b981' : 'none',
+            animation: online ? 'pulse 2s infinite' : 'none',
+          }} />
+          {online ? 'LIVE' : 'OFF'}
+        </span>
       </div>
-      <div style={{ textAlign: 'center' }}>
-        <div
-          style={{
-            fontSize: '2rem',
-            fontWeight: '700',
-            background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            backgroundClip: 'text',
-            animation: isAnimating ? 'glow 0.45s ease-in-out' : 'none',
-          }}
-        >
-          {displayViewers?.toLocaleString() || 0}
-        </div>
-        <div
-          style={{
-            fontSize: '0.9rem',
-            color: 'rgba(255,255,255,0.7)',
-            marginTop: '0.25rem',
-          }}
-        >
-          spectateurs
-        </div>
+
+      <div style={{
+        fontSize: isAnimating ? '2.2rem' : '2rem',
+        fontWeight: 800,
+        color: online ? 'white' : 'rgba(255,255,255,0.25)',
+        lineHeight: 1,
+        transition: 'font-size 0.15s',
+        marginBottom: 4,
+      }}>
+        {displayViewers.toLocaleString()}
       </div>
-      <div
-        style={{
-          marginTop: '1rem',
-          height: '4px',
-          backgroundColor: 'rgba(255,255,255,0.1)',
-          borderRadius: '2px',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            height: '100%',
-            background: online
-              ? 'linear-gradient(90deg, #10b981, #3b82f6)'
-              : 'linear-gradient(90deg, #6b7280, #9ca3af)',
-            borderRadius: '2px',
-            width: `${Math.min(100, (displayViewers / 50000) * 100)}%`,
-            transition: 'width 350ms cubic-bezier(0.4, 0, 0.2, 1)',
-            boxShadow: online ? '0 0 10px rgba(16, 185, 129, 0.5)' : 'none',
-          }}
-        />
+      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>spectateurs</div>
+
+      <div style={{
+        marginTop: '1rem', height: 3,
+        background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden',
+      }}>
+        <div style={{
+          height: '100%',
+          background: online ? 'linear-gradient(90deg, #10b981, #3b82f6)' : 'rgba(255,255,255,0.1)',
+          borderRadius: 2,
+          width: `${Math.min(100, (displayViewers / Math.max(50000, displayViewers)) * 100)}%`,
+          transition: 'width 350ms cubic-bezier(0.4, 0, 0.2, 1)',
+          boxShadow: online ? '0 0 8px rgba(16,185,129,0.5)' : 'none',
+        }} />
       </div>
     </div>
   );
@@ -743,216 +693,331 @@ export default function ClientDashboard() {
     } catch {}
   }, [reducedHistory]);
 
+  const liveStreamsCount = (event?.streams || []).filter(s => !!event?.state?.streams?.[s.id]?.online).length;
+
   return (
-    <div className="app-bg">
-      <div className="container" style={{ paddingTop: '6vh' }}>
-        <ParticleSystem />
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(160deg, #030712 0%, #0c1225 40%, #0f1f3d 100%)',
+      color: 'white',
+      fontFamily: "'Inter', system-ui, sans-serif",
+    }}>
+      <ParticleSystem />
+
+      {/* ── Top nav ── */}
+      <nav style={{
+        position: 'sticky',
+        top: 0,
+        zIndex: 50,
+        background: 'rgba(3,7,18,0.75)',
+        backdropFilter: 'blur(20px)',
+        borderBottom: '1px solid rgba(255,255,255,0.07)',
+        padding: '0 1.5rem',
+        height: 60,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '1rem',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <img src={bsrqLogo} alt="BSRQ" style={{ height: 28 }} />
+          {event?.name && (
+            <span style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: 'rgba(255,255,255,0.55)',
+              borderLeft: '1px solid rgba(255,255,255,0.12)',
+              paddingLeft: '1rem',
+              maxWidth: isMobile ? 120 : 300,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>
+              {event.name}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Link
             to="/events"
             style={{
-              background: 'linear-gradient(45deg, #8b5cf6, #3b82f6)',
-              border: 'none',
-              borderRadius: '12px',
-              padding: '0.6rem 1rem',
-              color: 'white',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '0 14px',
+              height: 36,
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 10,
+              color: 'rgba(255,255,255,0.7)',
               textDecoration: 'none',
-              fontWeight: '600',
-              boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
-              transition: 'all 0.3s ease',
+              fontSize: 13,
+              fontWeight: 600,
+              transition: 'all 0.2s',
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(139, 92, 246, 0.3)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
-            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = 'white'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = 'rgba(255,255,255,0.7)'; }}
           >
-            ← Retour à l'évènement
+            ← Retour
           </Link>
           <button
+            type="button"
             onClick={async () => {
               try { await logout(); } catch {}
               try { navigate('/login?aud=client', { replace: true }); } catch { window.location.assign('/login?aud=client'); }
             }}
             style={{
-              background: 'linear-gradient(45deg, #ef4444, #b91c1c)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '12px',
-              padding: '0.6rem 1rem',
-              fontWeight: '600',
-              boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
-              transition: 'all 0.3s ease',
-              cursor: 'pointer'
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '0 14px',
+              height: 36,
+              background: 'rgba(239,68,68,0.1)',
+              border: '1px solid rgba(239,68,68,0.25)',
+              borderRadius: 10,
+              color: '#fca5a5',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(239, 68, 68, 0.4)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
-            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.2)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.1)'; }}
           >
-            Déconnexion
+            ⏻ Déconnexion
           </button>
         </div>
+      </nav>
 
-        <div
-          style={{
-            background: 'rgba(255, 255, 255, 0.1)',
-            backdropFilter: 'blur(10px)',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
-            borderRadius: '20px',
-            padding: '2rem 1rem',
-            textAlign: 'center',
-          }}
-        >
-          <div style={{ marginBottom: '1rem' }}>
-            <img src={bsrqLogo} alt="BSRQ" style={{ height: '60px' }} />
-          </div>
-          <h1
-            style={{
-              margin: '0 0 0.6rem 0',
-              fontSize: '2.5rem',
-              fontWeight: '700',
-              background: 'linear-gradient(45deg, #f59e0b, #ef4444, #0c2164ff)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-            }}
-          >
-            📊 Dashboard Live
-          </h1>
-          <div style={{ opacity: 0.85, fontWeight: 600 }}>
-            {sseStatus === 'live' && <span style={{ color: '#10b981' }}>LIVE</span>}
-            {sseStatus === 'connecting' && <span style={{ color: '#f59e0b' }}>Connexion…</span>}
-            {sseStatus === 'reconnecting' && <span style={{ color: '#f59e0b' }}>Reconnexion…</span>}
-            <span style={{ color: 'rgba(255,255,255,0.65)', marginLeft: 10 }}>
-              (mise à jour auto, aucun refresh)
-            </span>
-          </div>
-          <div
-            style={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%)',
-              backdropFilter: 'blur(20px)',
-              border: '1px solid rgba(255,255,255,0.3)',
-              borderRadius: '20px',
-              padding: '2rem',
-              maxWidth: '420px',
-              margin: '1rem auto 0',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-            }}
-          >
-            <div
-              style={{
-                fontSize: '0.9rem',
-                color: 'rgba(255,255,255,0.8)',
-                marginBottom: '0.5rem',
-                textTransform: 'uppercase',
-                letterSpacing: '1px',
-              }}
-            >
-              Total Spectateurs
+      {/* ── Main content ── */}
+      <div style={{
+        maxWidth: 1100,
+        margin: '0 auto',
+        padding: isMobile ? '1.5rem 1rem 3rem' : '2.5rem 2rem 4rem',
+        position: 'relative',
+        zIndex: 1,
+      }}>
+
+        {/* ── Hero : total spectateurs ── */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+          gap: '1rem',
+          marginBottom: '1.5rem',
+        }}>
+          {/* Total card */}
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(16,185,129,0.08) 100%)',
+            border: '1px solid rgba(59,130,246,0.2)',
+            borderRadius: 20,
+            padding: '2rem',
+            position: 'relative',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              position: 'absolute', top: -40, right: -40,
+              width: 140, height: 140,
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%)',
+              pointerEvents: 'none',
+            }} />
+            <div style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: '#60a5fa',
+              marginBottom: 8,
+            }}>
+              Total spectateurs
             </div>
-            <div
-              style={{
-                fontSize: '3.5rem',
-                fontWeight: '800',
-                background: 'linear-gradient(45deg, #10b981, #3b82f6)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-                lineHeight: '1',
-              }}
-            >
+            <div style={{
+              fontSize: isMobile ? '3rem' : '4rem',
+              fontWeight: 800,
+              lineHeight: 1,
+              background: 'linear-gradient(135deg, #60a5fa, #34d399)',
+              WebkitBackgroundClip: 'text',
+              backgroundClip: 'text',
+              color: 'transparent',
+              marginBottom: 12,
+            }}>
               {safeNum(totalViewers, 0).toLocaleString()}
             </div>
             {totalViewers > previousTotal && (
-              <div style={{ color: '#10b981', fontSize: '0.9rem', marginTop: '0.5rem' }}>
-                📈 +{(totalViewers - previousTotal).toLocaleString()}
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: 'rgba(16,185,129,0.12)',
+                border: '1px solid rgba(16,185,129,0.25)',
+                borderRadius: 999,
+                padding: '4px 12px',
+                fontSize: 13,
+                fontWeight: 600,
+                color: '#34d399',
+              }}>
+                ↑ +{(totalViewers - previousTotal).toLocaleString()} depuis le début
+              </div>
+            )}
+          </div>
+
+          {/* Status + streams actifs */}
+          <div style={{
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.07)',
+            borderRadius: 20,
+            padding: '2rem',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            gap: '1rem',
+          }}>
+            {/* SSE status */}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.35)', marginBottom: 12 }}>
+                Statut
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{
+                  display: 'inline-block',
+                  width: 8, height: 8,
+                  borderRadius: '50%',
+                  background: sseStatus === 'live' ? '#10b981' : '#f59e0b',
+                  boxShadow: sseStatus === 'live' ? '0 0 8px #10b981' : '0 0 8px #f59e0b',
+                  animation: 'pulse 2s infinite',
+                }} />
+                <span style={{ fontWeight: 700, fontSize: 15, color: sseStatus === 'live' ? '#34d399' : '#fbbf24' }}>
+                  {sseStatus === 'live' ? 'En direct' : sseStatus === 'connecting' ? 'Connexion…' : 'Reconnexion…'}
+                </span>
+                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>
+                  · mise à jour auto
+                </span>
+              </div>
+            </div>
+            {/* Streams actifs */}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.35)', marginBottom: 8 }}>
+                Streams actifs
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ fontSize: '2.5rem', fontWeight: 800, color: liveStreamsCount > 0 ? '#34d399' : 'rgba(255,255,255,0.3)' }}>
+                  {liveStreamsCount}
+                </span>
+                <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)' }}>
+                  / {(event?.streams || []).length} streams
+                </span>
+              </div>
+            </div>
+            {/* Lien visionner */}
+            <Link
+              to={`/event/${id}/live`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                padding: '10px 20px',
+                background: 'linear-gradient(135deg, #2563eb, #0891b2)',
+                border: 'none',
+                borderRadius: 12,
+                color: 'white',
+                textDecoration: 'none',
+                fontWeight: 700,
+                fontSize: 14,
+                transition: 'opacity 0.2s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.opacity = '0.85'; }}
+              onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
+            >
+              ▶ Visionner le direct
+            </Link>
+          </div>
+        </div>
+
+        {/* ── Chart ── */}
+        <div style={{
+          background: 'rgba(255,255,255,0.03)',
+          border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: 20,
+          padding: isMobile ? '1.25rem' : '1.75rem',
+          marginBottom: '1.5rem',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: '1.5rem',
+          }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.35)', marginBottom: 4 }}>
+                Évolution
+              </div>
+              <div style={{ fontSize: isMobile ? '1rem' : '1.15rem', fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>
+                Spectateurs en temps réel
+              </div>
+            </div>
+            {reducedHistory.length > 0 && (
+              <div style={{
+                fontSize: 12,
+                color: 'rgba(255,255,255,0.3)',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.07)',
+                borderRadius: 8,
+                padding: '4px 10px',
+              }}>
+                {reducedHistory.length} points
+              </div>
+            )}
+          </div>
+          <div style={{ height: isMobile ? 220 : 300, position: 'relative' }}>
+            <Line ref={chartRef} data={chartData} options={chartOptions} datasetIdKey="id" />
+            {reducedHistory.length === 0 && (
+              <div style={{
+                position: 'absolute', inset: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexDirection: 'column', gap: 8,
+                color: 'rgba(255,255,255,0.25)',
+                fontSize: 14,
+              }}>
+                <span style={{ fontSize: 28 }}>📊</span>
+                Aucune donnée disponible pour le moment
               </div>
             )}
           </div>
         </div>
 
-        <div style={{ marginTop: isMobile ? '0.75rem' : '1.5rem' }} />
-
-        {/* chart */}
-        <div style={{ padding: isMobile ? '1.25rem 0 0.75rem' : '2rem 0 1rem' }}>
-          <div
-            style={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
-              backdropFilter: 'blur(10px)',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: '20px',
-              padding: isMobile ? '1.25rem' : '2rem',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-            }}
-          >
-            <h3
-              style={{
-                margin: '0 0 1.5rem 0',
-                fontSize: isMobile ? '1.25rem' : '1.5rem',
-                fontWeight: '600',
-                background: 'linear-gradient(45deg, #0c2164ff, #3b82f6)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-              }}
-            >
-              📈 Évolution Temps Réel
-            </h3>
-
-            <div style={{ height: isMobile ? '240px' : '320px', position: 'relative' }}>
-              <Line ref={chartRef} data={chartData} options={chartOptions} datasetIdKey="id" />
-              {reducedHistory.length === 0 && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'rgba(255,255,255,0.9)',
-                    fontWeight: 600,
-                    background: 'rgba(0,0,0,0.12)',
-                    borderRadius: 16,
-                  }}
-                >
-                  Aucune donnée disponible pour le moment.
-                </div>
-              )}
+        {/* ── Stream cards ── */}
+        {(event?.streams || []).length > 0 && (
+          <>
+            <div style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: 'rgba(255,255,255,0.3)',
+              marginBottom: '0.75rem',
+            }}>
+              Détail par stream
             </div>
-          </div>
-        </div>
-
-        <div style={{ padding: isMobile ? '1.25rem 0 0.75rem' : '2rem 0 1rem' }}>
-          <div
-            style={{
+            <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gap: '1rem',
-              marginBottom: '0.5rem',
-            }}
-          >
-            {(event?.streams || []).map((s) => {
-              const st = event?.state?.streams?.[s.id];
-              return (
-                <DynamicStreamCard
-                  key={s.id}
-                  label={s.label}
-                  current={safeNum(st?.current, 0)}
-                  online={!!st?.online}
-                />
-              );
-            })}
-          </div>
-        </div>
-
+              gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(260px, 1fr))',
+              gap: '0.75rem',
+            }}>
+              {(event.streams).map((s) => {
+                const st = event?.state?.streams?.[s.id];
+                return (
+                  <DynamicStreamCard
+                    key={s.id}
+                    label={s.label}
+                    current={safeNum(st?.current, 0)}
+                    online={!!st?.online}
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
