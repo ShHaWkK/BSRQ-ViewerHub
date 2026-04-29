@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import Spinner from './Spinner.jsx';
 
 export default function ProtectedRoute({ children, aud = 'admin' }) {
   const [state, setState] = useState('pending');
@@ -44,7 +45,7 @@ export default function ProtectedRoute({ children, aud = 'admin' }) {
     try { window.location.replace(loginUrl); } catch { window.location.href = loginUrl; }
   }, [state, aud, location.pathname, location.search]);
 
-  if (state === 'pending') return <div style={{ padding: 24 }}>Chargement…</div>;
-  if (state === 'nope') return <div style={{ padding: 24 }}>Redirection… <a href={redirectUrl}>continuer</a></div>;
+  if (state === 'pending') return <Spinner fullPage label="Vérification…" />;
+  if (state === 'nope') return <Spinner fullPage label="Redirection…" />;
   return children;
 }

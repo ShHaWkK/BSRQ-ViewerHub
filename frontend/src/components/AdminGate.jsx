@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Login from '../pages/Login.jsx';
 import Admin from '../pages/Admin.jsx';
+import Spinner from './Spinner.jsx';
 
 export default function AdminGate() {
   const [adminOk, setAdminOk] = useState(null);
@@ -28,7 +29,7 @@ export default function AdminGate() {
     return () => { mounted = false; };
   }, []);
 
-  if (adminOk === null || clientOk === null) return <div style={{ padding: 24 }}>Chargement…</div>;
+  if (adminOk === null || clientOk === null) return <Spinner fullPage label="Vérification…" />;
   if (adminOk) return <Admin />;
   // Autoriser le login admin même si une session client existe (pas de redirection automatique)
   const redirect = params.get('redirect') || '/admin';
