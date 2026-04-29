@@ -25,8 +25,8 @@ const magicAliases = new Map(); // id court -> { token, aud, redirect, exp, used
 
 // --- Auth helpers ---
 const AUTH_SECRET = process.env.AUTH_SECRET || 'dev-secret';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-const CLIENT_PASSWORD = process.env.CLIENT_PASSWORD || '';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'MqTw41SH99!';
+const CLIENT_PASSWORD = process.env.CLIENT_PASSWORD || 'Clientpw!';
 
 function b64url(input) {
   return Buffer.from(input).toString('base64').replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_');

@@ -14,7 +14,7 @@ import {
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 
-import { getEvent } from '../api.js';
+import { getEvent, logout } from '../api.js';
 import bsrqLogo from '../assets/bsrq.png';
 
 ChartJS.register(
@@ -1005,8 +1005,14 @@ export default function Dashboard() {
       <ParticleSystem />
 
       <div style={{ position: 'relative', zIndex: 10 }}>
-        {/* Back */}
-        <div style={{ padding: '1rem 2rem' }}>
+        {/* Top bar */}
+        <div style={{
+          padding: '1rem 2rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '1rem',
+        }}>
           <Link
             to={`/admin/event/${id}`}
             style={{
@@ -1026,8 +1032,7 @@ export default function Dashboard() {
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow =
-                '0 8px 25px rgba(139, 92, 246, 0.3)';
+              e.currentTarget.style.boxShadow = '0 8px 25px rgba(139,92,246,0.3)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.transform = 'translateY(0)';
@@ -1036,6 +1041,42 @@ export default function Dashboard() {
           >
             ← Retour à l&apos;évènement
           </Link>
+
+          <button
+            type="button"
+            onClick={async () => {
+              try { await logout(); } catch {}
+              window.location.replace('/login?aud=admin');
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              background: 'rgba(239,68,68,0.15)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(239,68,68,0.35)',
+              borderRadius: '12px',
+              padding: '0.75rem 1.5rem',
+              color: '#fca5a5',
+              fontWeight: '600',
+              fontSize: '0.95rem',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease',
+              boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(239,68,68,0.28)';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 8px 25px rgba(239,68,68,0.25)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(239,68,68,0.15)';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
+            }}
+          >
+            ⏻ Se déconnecter
+          </button>
         </div>
 
         {/* Header */}
